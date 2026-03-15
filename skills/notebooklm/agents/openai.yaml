@@ -1,0 +1,4 @@
+interface:
+  display_name: "NotebookLM Pipeline"
+  short_description: "Create notebooks and generate NotebookLM outputs"
+  default_prompt: "Use $notebooklm to create a notebook, add sources, analyze them, and generate artifacts."

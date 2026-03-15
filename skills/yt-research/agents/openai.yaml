@@ -1,0 +1,4 @@
+interface:
+  display_name: "YT Research"
+  short_description: "Search and export YouTube metadata"
+  default_prompt: "Use $yt-research to find recent YouTube videos on a topic and return structured metadata."
