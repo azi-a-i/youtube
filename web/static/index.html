@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube Research & NotebookLM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="header">
+    <h1>YouTube Research <span class="accent">→</span> NotebookLM</h1>
+    <p class="tagline">Search YouTube, collect videos, then synthesize and generate artifacts with NotebookLM.</p>
+  </header>
+
+  <main class="main">
+    <section class="panel" id="yt-panel">
+      <h2>1. YouTube Research</h2>
+      <p class="hint">Search by topic and get structured video metadata. Use results in NotebookLM below.</p>
+      <form id="yt-form" class="form">
+        <div class="field">
+          <label for="query">Topic or query</label>
+          <input type="text" id="query" name="query" required placeholder="e.g. artificial intelligence agents" />
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="count">Number of videos</label>
+            <input type="number" id="count" name="count" min="5" max="50" value="25" />
+          </div>
+          <div class="field">
+            <label for="search_mode">Search mode</label>
+            <select id="search_mode" name="search_mode">
+              <option value="latest">Latest (recent uploads)</option>
+              <option value="relevance">Relevance</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="sort">Sort by</label>
+            <select id="sort" name="sort">
+              <option value="views">Views</option>
+              <option value="latest">Latest</option>
+            </select>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary" id="yt-submit">Search YouTube</button>
+      </form>
+      <div id="yt-status" class="status" aria-live="polite"></div>
+      <div id="yt-results" class="results-container" hidden>
+        <h3>Results</h3>
+        <div class="results-meta"></div>
+        <div class="table-wrap">
+          <table class="results-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Title</th>
+                <th>Channel</th>
+                <th>Views</th>
+                <th>Duration</th>
+                <th>Link</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn btn-secondary" id="use-in-notebooklm">Use these in NotebookLM →</button>
+      </div>
+    </section>
+
+    <section class="panel" id="notebooklm-panel">
+      <h2>2. NotebookLM Pipeline</h2>
+      <p class="hint">Create a notebook from URLs (from the search above or paste your own), run analysis, and generate infographics, slide decks, or flashcards.</p>
+      <form id="nl-form" class="form">
+        <div class="field">
+          <label for="nl-title">Notebook title</label>
+          <input type="text" id="nl-title" name="title" required placeholder="e.g. YouTube Research: AI Agents" />
+        </div>
+        <div class="field">
+          <label for="nl-urls">URLs or paste yt-research JSON</label>
+          <textarea id="nl-urls" name="urls" rows="4" placeholder="Paste one URL per line, or JSON from YouTube Research (e.g. {\"videos\": [...]}). Click «Use these in NotebookLM» above to auto-fill."></textarea>
+        </div>
+        <div class="field">
+          <label for="nl-analysis">Analysis prompt</label>
+          <textarea id="nl-analysis" name="analysis_prompt" rows="2" placeholder="Summarize the top findings across these sources. Highlight repeated themes and takeaways."></textarea>
+        </div>
+        <div class="field">
+          <label>Artifacts to generate</label>
+          <div class="checkbox-group">
+            <label class="checkbox-label"><input type="checkbox" name="artifact" value="infographic" checked /> Infographic</label>
+            <label class="checkbox-label"><input type="checkbox" name="artifact" value="slide-deck" /> Slide deck</label>
+            <label class="checkbox-label"><input type="checkbox" name="artifact" value="flashcards" /> Flashcards</label>
+          </div>
+        </div>
+        <details class="advanced">
+          <summary>Advanced options</summary>
+          <div class="field">
+            <label for="nl-artifact-instructions">Artifact instructions (optional)</label>
+            <input type="text" id="nl-artifact-instructions" name="artifact_instructions" placeholder="e.g. Use a chalkboard-style visual" />
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="nl-infographic-style">Infographic style</label>
+              <select id="nl-infographic-style" name="infographic_style">
+                <option value="auto">Auto</option>
+                <option value="sketch-note">Sketch note</option>
+                <option value="professional">Professional</option>
+                <option value="bento-grid">Bento grid</option>
+                <option value="editorial">Editorial</option>
+                <option value="scientific">Scientific</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="nl-slide-format">Slide deck format</label>
+              <select id="nl-slide-format" name="slide_deck_output_format">
+                <option value="pptx">PPTX</option>
+                <option value="pdf">PDF</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="nl-flashcards-format">Flashcards format</label>
+              <select id="nl-flashcards-format" name="flashcards_format">
+                <option value="markdown">Markdown</option>
+                <option value="json">JSON</option>
+                <option value="html">HTML</option>
+              </select>
+            </div>
+          </div>
+        </details>
+        <button type="submit" class="btn btn-primary" id="nl-submit">Run NotebookLM pipeline</button>
+      </form>
+      <div id="nl-status" class="status" aria-live="polite"></div>
+      <div id="nl-job-progress" class="job-progress" hidden>
+        <p>Pipeline running… This can take several minutes. Do not close this page.</p>
+        <div class="progress-bar"><div class="progress-fill"></div></div>
+      </div>
+      <div id="nl-result" class="result-box" hidden>
+        <h3>Done</h3>
+        <div class="result-meta"></div>
+        <div id="nl-artifacts" class="artifacts-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
