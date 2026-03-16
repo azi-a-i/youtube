@@ -266,6 +266,20 @@ body::before {
   line-height: 1.7;
 }
 
+.summary-card a,
+.panel a,
+.feature-card a,
+.capability-card a {
+  color: var(--teal);
+}
+
+.summary-card a:hover,
+.panel a:hover,
+.feature-card a:hover,
+.capability-card a:hover {
+  color: var(--accent-deep);
+}
+
 .page-shell {
   padding: 1.5rem 0 3rem;
 }
@@ -274,6 +288,10 @@ body::before {
   display: grid;
   grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.88fr);
   gap: 1.2rem;
+}
+
+.connect-shell {
+  align-items: start;
 }
 
 .hero-copy,
@@ -449,6 +467,11 @@ body::before {
 
 .advanced-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 1rem;
+}
+
+.compact-summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 1rem;
 }
 

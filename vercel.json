@@ -14,11 +14,11 @@
       "destination": "/api/index"
     },
     {
-      "source": "/workspace",
+      "source": "/connect",
       "destination": "/api/index"
     },
     {
-      "source": "/auth/:path*",
+      "source": "/workspace",
       "destination": "/api/index"
     },
     {

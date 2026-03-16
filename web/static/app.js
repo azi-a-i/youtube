@@ -1,4 +1,5 @@
 "use strict";
+const NOTEBOOK_SESSION_KEY = "llmnotetube.notebooklmSession";
 const bootstrapWindow = window;
 const bootstrap = bootstrapWindow.LLMNOTETUBE_BOOTSTRAP ?? {};
 const state = {
@@ -57,6 +58,49 @@ function formatParagraphs(text) {
         .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
         .join("");
 }
+function readNotebookSession() {
+    try {
+        const rawValue = window.localStorage.getItem(NOTEBOOK_SESSION_KEY);
+        if (!rawValue) {
+            return null;
+        }
+        const parsed = JSON.parse(rawValue);
+        if (typeof parsed.authJson !== "string" || !parsed.authJson.trim()) {
+            return null;
+        }
+        return parsed;
+    }
+    catch {
+        return null;
+    }
+}
+function writeNotebookSession(payload) {
+    window.localStorage.setItem(NOTEBOOK_SESSION_KEY, JSON.stringify(payload));
+}
+function clearNotebookSession() {
+    window.localStorage.removeItem(NOTEBOOK_SESSION_KEY);
+}
+function syncNotebookSessionInputs() {
+    const session = readNotebookSession();
+    const value = session?.authJson ?? "";
+    const inputIds = ["connect-auth-json", "workspace-connect-auth-json"];
+    inputIds.forEach((id) => {
+        const input = maybeById(id);
+        if (input) {
+            input.value = value;
+        }
+    });
+}
+function formatValidatedAt(value) {
+    if (!value) {
+        return "Not validated yet";
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return "Connected in this browser";
+    }
+    return `Validated ${date.toLocaleString()}`;
+}
 async function fetchJson(url, options) {
     const response = await fetch(url, options);
     const text = await response.text();
@@ -86,70 +130,111 @@ function updateSelectionRibbon() {
         selectionCount.textContent = `${getSelectedVideos().length} selected`;
     }
 }
+function updateConnectionPanels() {
+    const session = readNotebookSession();
+    const connected = Boolean(session);
+    const cookieCount = session?.cookieCount ?? 0;
+    const detail = connected
+        ? `${formatValidatedAt(session?.validatedAt)}${cookieCount ? ` • ${cookieCount} cookies detected` : ""}`
+        : "No NotebookLM session has been saved in this browser yet.";
+    const connectSessionState = maybeById("connect-session-state");
+    const connectSessionDetail = maybeById("connect-session-detail");
+    const connectCookieCount = maybeById("connect-cookie-count");
+    const workspaceSessionState = maybeById("workspace-session-state");
+    const workspaceSessionDetail = maybeById("workspace-session-detail");
+    if (connectSessionState) {
+        connectSessionState.textContent = connected ? "Connected" : "Not connected";
+    }
+    if (connectSessionDetail) {
+        connectSessionDetail.textContent = detail;
+    }
+    if (connectCookieCount) {
+        connectCookieCount.textContent = String(cookieCount);
+    }
+    if (workspaceSessionState) {
+        workspaceSessionState.textContent = connected ? "Connected" : "Not connected";
+    }
+    if (workspaceSessionDetail) {
+        workspaceSessionDetail.textContent = connected
+            ? detail
+            : "Add a NotebookLM session to power synthesis in this browser.";
+    }
+}
 function renderSystemStatus(payload) {
     state.system = payload;
-    const siteAuthState = maybeById("site-auth-state");
-    const siteAuthDetail = maybeById("site-auth-detail");
+    const session = readNotebookSession();
+    const hasBrowserSession = Boolean(session);
+    const hasSharedBackend = payload.notebooklm_ready;
+    const notebookReady = hasBrowserSession || hasSharedBackend;
     const researchState = maybeById("research-state");
     const researchDetail = maybeById("research-detail");
     const notebookState = maybeById("notebook-state");
     const notebookDetail = maybeById("notebook-detail");
+    const runtimeState = maybeById("runtime-state");
+    const runtimeDetail = maybeById("runtime-detail");
     const workspaceState = maybeById("workspace-state");
     const workspaceDetail = maybeById("workspace-detail");
     const workspaceNote = maybeById("workspace-note");
-    if (siteAuthState) {
-        siteAuthState.textContent = payload.site_auth.authenticated ? "Connected" : "Not connected";
-    }
-    if (siteAuthDetail) {
-        if (payload.site_auth.authenticated) {
-            siteAuthDetail.textContent = payload.site_auth.user?.email || "Signed in";
-        }
-        else if (payload.site_auth.google_oauth_configured) {
-            siteAuthDetail.textContent = "Sign in with Google to unlock the workspace.";
-        }
-        else {
-            siteAuthDetail.textContent = "Google login is not configured for this deployment.";
-        }
-    }
     if (researchState) {
-        if (!payload.site_auth.authenticated) {
-            researchState.textContent = "Locked";
-        }
-        else {
-            researchState.textContent = payload.yt_research_ready ? "Ready" : "Offline";
-        }
+        researchState.textContent = payload.yt_research_ready ? "Ready" : "Offline";
     }
     if (researchDetail) {
-        researchDetail.textContent = payload.site_auth.authenticated
-            ? payload.yt_research_ready
-                ? "YouTube metadata search is available."
-                : "The Python backend is not ready for search."
-            : "Login is required before users can run topic research.";
+        researchDetail.textContent = payload.yt_research_ready
+            ? "YouTube topic search is available without any login."
+            : "The Python backend is not ready for YouTube search.";
     }
     if (notebookState) {
-        notebookState.textContent = payload.notebooklm_ready ? "Connected" : "Not ready";
+        notebookState.textContent = notebookReady ? "Connected" : "Not connected";
     }
     if (notebookDetail) {
-        notebookDetail.textContent = payload.notebooklm_ready
-            ? `Backend auth source: ${payload.auth_source || "connected"}`
-            : payload.deploy_auth_hint || "NotebookLM backend auth is still missing.";
+        if (hasBrowserSession) {
+            notebookDetail.textContent = `Connected in this browser. ${formatValidatedAt(session?.validatedAt)}`;
+        }
+        else if (hasSharedBackend) {
+            notebookDetail.textContent = `Shared backend auth source: ${payload.auth_source || "connected"}`;
+        }
+        else {
+            notebookDetail.textContent =
+                payload.deploy_auth_hint || "Connect NotebookLM to run synthesis and generate artifacts.";
+        }
+    }
+    if (runtimeState) {
+        runtimeState.textContent = payload.python_ready ? "Operational" : "Unavailable";
+    }
+    if (runtimeDetail) {
+        runtimeDetail.textContent = payload.python_ready
+            ? hasSharedBackend
+                ? `Python is ready. Shared NotebookLM auth source: ${payload.auth_source || "connected"}`
+                : "Python is ready. Shared NotebookLM auth is not configured on this deployment."
+            : "Python runtime is unavailable, so searches and NotebookLM jobs cannot run.";
     }
     if (workspaceState) {
-        workspaceState.textContent = payload.workspace_ready
-            ? "Operational"
-            : payload.site_auth.authenticated
-                ? "Partially ready"
-                : "Locked";
+        if (!payload.python_ready) {
+            workspaceState.textContent = "Offline";
+        }
+        else if (notebookReady) {
+            workspaceState.textContent = "Synthesis ready";
+        }
+        else {
+            workspaceState.textContent = "Research ready";
+        }
     }
     if (workspaceDetail) {
-        workspaceDetail.textContent = payload.workspace_detail || "Workspace status unavailable.";
+        workspaceDetail.textContent = !payload.python_ready
+            ? "The backend runtime is unavailable."
+            : notebookReady
+                ? "Search, synthesis, and artifact generation are available."
+                : "You can research immediately. Connect NotebookLM to unlock synthesis.";
     }
     if (workspaceNote) {
-        workspaceNote.className = payload.notebooklm_ready ? "message message-info" : "message message-warning";
-        workspaceNote.textContent = payload.notebooklm_ready
-            ? `Google login is active. NotebookLM is connected in ${payload.pipeline_delivery_mode || "background"} mode.`
-            : payload.deploy_auth_hint || "NotebookLM backend auth is not configured yet.";
+        workspaceNote.className = notebookReady ? "message message-info" : "message message-warning";
+        workspaceNote.textContent = notebookReady
+            ? hasBrowserSession
+                ? "NotebookLM is connected in this browser, so pipeline requests can use your session."
+                : `NotebookLM is powered by shared backend auth in ${payload.pipeline_delivery_mode || "background"} mode.`
+            : payload.deploy_auth_hint || "Connect NotebookLM to enable synthesis.";
     }
+    updateConnectionPanels();
 }
 async function loadSystemStatus() {
     try {
@@ -159,9 +244,9 @@ async function loadSystemStatus() {
     catch (error) {
         const message = error instanceof Error ? error.message : "Status endpoint failed.";
         const elements = [
-            maybeById("site-auth-detail"),
             maybeById("research-detail"),
             maybeById("notebook-detail"),
+            maybeById("runtime-detail"),
             maybeById("workspace-detail"),
         ];
         elements.forEach((element) => {
@@ -407,6 +492,58 @@ function pollJob(jobId, submitButton) {
         }
     }, 2500);
 }
+function attachNotebookConnectForm(formId, inputId, statusId, clearId) {
+    const form = maybeById(formId);
+    const input = maybeById(inputId);
+    const status = maybeById(statusId);
+    const clearButton = maybeById(clearId);
+    if (!form || !input || !status) {
+        return;
+    }
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const authJson = input.value.trim();
+        if (!authJson) {
+            setMessage(status, "Paste your NotebookLM auth JSON first.", "warning");
+            return;
+        }
+        setMessage(status, "Validating NotebookLM session...", "info");
+        try {
+            const payload = await fetchJson("/api/notebooklm/validate", {
+                body: JSON.stringify({ auth_json: authJson }),
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            });
+            writeNotebookSession({
+                authJson,
+                cookieCount: payload.cookie_count ?? 0,
+                validatedAt: new Date().toISOString(),
+            });
+            syncNotebookSessionInputs();
+            updateConnectionPanels();
+            if (state.system) {
+                renderSystemStatus(state.system);
+            }
+            else {
+                await loadSystemStatus();
+            }
+            setMessage(status, payload.message || "NotebookLM is connected in this browser.", "success");
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : "Unable to validate NotebookLM auth JSON.";
+            setMessage(status, message, "error");
+        }
+    });
+    clearButton?.addEventListener("click", () => {
+        clearNotebookSession();
+        syncNotebookSessionInputs();
+        updateConnectionPanels();
+        if (state.system) {
+            renderSystemStatus(state.system);
+        }
+        setMessage(status, "NotebookLM session cleared from this browser.", "info");
+    });
+}
 function attachWorkspaceHandlers() {
     const ytForm = maybeById("yt-form");
     const nlForm = maybeById("nl-form");
@@ -495,14 +632,13 @@ function attachWorkspaceHandlers() {
         resultPanel.hidden = true;
         stopPolling();
         stopProgressAnimation();
+        if (state.lastYtPayload?.query) {
+            nlTitle.value = `LLMNoteTube Research: ${state.lastYtPayload.query}`;
+        }
     });
     ytForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const submitButton = byId("yt-submit");
-        if (!state.system?.site_auth.authenticated) {
-            setMessage(ytStatus, "Login with Google before running research.", "warning");
-            return;
-        }
         submitButton.disabled = true;
         clearMessage(ytStatus);
         clearMessage(ytWarning);
@@ -538,12 +674,9 @@ function attachWorkspaceHandlers() {
         const submitButton = byId("nl-submit");
         clearMessage(nlStatus);
         resultPanel.hidden = true;
-        if (!state.system?.site_auth.authenticated) {
-            setMessage(nlStatus, "Login with Google before using the workspace.", "warning");
-            return;
-        }
-        if (!state.system?.notebooklm_ready) {
-            setMessage(nlStatus, state.system?.deploy_auth_hint || "NotebookLM backend is not ready yet.", "warning");
+        const notebookSession = readNotebookSession();
+        if (!notebookSession && !state.system?.notebooklm_ready) {
+            setMessage(nlStatus, "Connect NotebookLM first, or use a deployment with shared NotebookLM backend auth.", "warning");
             return;
         }
         const artifacts = Array.from(document.querySelectorAll('input[name="artifact"]:checked')).map((input) => input.value);
@@ -569,6 +702,7 @@ function attachWorkspaceHandlers() {
             analysis_prompt: nlAnalysis.value.trim() || undefined,
             artifact_instructions: byId("nl-artifact-instructions").value.trim() || undefined,
             artifacts,
+            auth_json: notebookSession?.authJson,
             flashcards_format: byId("nl-flashcards-format").value,
             infographic_orientation: "portrait",
             infographic_style: byId("nl-infographic-style").value,
@@ -603,5 +737,9 @@ function attachWorkspaceHandlers() {
         }
     });
 }
+syncNotebookSessionInputs();
+updateConnectionPanels();
 void loadSystemStatus();
+attachNotebookConnectForm("connect-form", "connect-auth-json", "connect-status", "clear-connect");
+attachNotebookConnectForm("workspace-connect-form", "workspace-connect-auth-json", "workspace-connect-status", "workspace-clear-connect");
 attachWorkspaceHandlers();

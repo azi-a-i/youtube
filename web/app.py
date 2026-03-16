@@ -12,27 +12,18 @@ import tempfile
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
-from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any
 
 from flask import (
     Flask,
     jsonify,
-    redirect,
     render_template,
     request,
     send_from_directory,
-    session,
-    url_for,
 )
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
-
-try:
-    from authlib.integrations.flask_client import OAuth
-except ImportError:  # pragma: no cover - dependency added at runtime
-    OAuth = None
 
 APP_ROOT = Path(__file__).resolve().parent
 DEFAULT_WORKSPACE_ROOT = APP_ROOT.parents[0]
@@ -52,10 +43,7 @@ NOTEBOOKLM_STORAGE = Path(
 NOTEBOOKLM_CONTEXT = Path(
     os.environ.get("NOTEBOOKLM_CONTEXT", str(NOTEBOOKLM_HOME / "context.json"))
 ).resolve()
-GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
 DEFAULT_SECRET_KEY = "llmnotetube-dev-secret-key"
-
-F = TypeVar("F", bound=Callable[..., Any])
 
 
 def env_truthy(name: str) -> bool:
@@ -98,16 +86,6 @@ app.config.update(
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 CORS(app, supports_credentials=True)
 
-oauth = OAuth(app) if OAuth else None
-if oauth and os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET"):
-    oauth.register(
-        name="google",
-        client_id=os.environ["GOOGLE_CLIENT_ID"],
-        client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
-        server_metadata_url=GOOGLE_DISCOVERY_URL,
-        client_kwargs={"scope": "openid email profile"},
-    )
-
 jobs: dict[str, dict[str, Any]] = {}
 jobs_lock = threading.Lock()
 
@@ -147,47 +125,12 @@ def get_notebooklm_auth_source() -> str:
     return "missing"
 
 
-def google_oauth_configured() -> bool:
-    return (
-        OAuth is not None
-        and bool(os.environ.get("GOOGLE_CLIENT_ID"))
-        and bool(os.environ.get("GOOGLE_CLIENT_SECRET"))
-    )
-
-
-def get_current_user() -> dict[str, Any] | None:
-    payload = session.get("user")
-    if isinstance(payload, dict) and payload.get("email"):
-        return payload
-    return None
-
-
-def api_login_required(view: F) -> F:
-    @wraps(view)
-    def wrapped(*args: Any, **kwargs: Any):
-        if get_current_user() is None:
-            return (
-                jsonify(
-                    {
-                        "error": "Google login required before using the workspace.",
-                        "login_url": url_for("auth_login", next=request.path),
-                    }
-                ),
-                401,
-            )
-        return view(*args, **kwargs)
-
-    return wrapped  # type: ignore[return-value]
-
-
 def serialize_site_auth_status() -> dict[str, Any]:
-    user = get_current_user()
     return {
-        "authenticated": user is not None,
-        "google_oauth_configured": google_oauth_configured(),
-        "login_url": url_for("auth_login", next=url_for("workspace_page")),
-        "logout_url": url_for("auth_logout"),
-        "user": user,
+        "authenticated": False,
+        "provider": None,
+        "mode": "none",
+        "message": "LLMNoteTube does not require a site account.",
     }
 
 
@@ -197,7 +140,7 @@ def serialize_system_status() -> dict[str, Any]:
     auth_source = get_notebooklm_auth_source()
     notebooklm_ready = auth_source in {"env", "storage-file"} and python_ready
     site_auth = serialize_site_auth_status()
-    workspace_ready = site_auth["authenticated"] and python_ready and notebooklm_ready
+    workspace_ready = python_ready
 
     return {
         "workspace_root": str(WORKSPACE_ROOT),
@@ -208,6 +151,7 @@ def serialize_system_status() -> dict[str, Any]:
         "pipeline_delivery_mode": "direct" if should_run_pipeline_inline() else "background",
         "site_auth": site_auth,
         "yt_research_ready": python_ready,
+        "anonymous_research_ready": python_ready,
         "notebooklm_home": str(NOTEBOOKLM_HOME),
         "notebooklm_ready": notebooklm_ready,
         "auth_ready": notebooklm_ready,
@@ -219,16 +163,16 @@ def serialize_system_status() -> dict[str, Any]:
         "login_command": r".\notebooklm.cmd login",
         "run_command": r".\run-web.cmd",
         "deploy_auth_hint": (
-            "NotebookLM uses backend session storage or NOTEBOOKLM_AUTH_JSON. "
-            "Google site login unlocks the workspace, but NotebookLM still needs "
-            "its own backend auth connection."
+            "NotebookLM needs either backend auth or a browser-provided auth JSON session. "
+            "YouTube research can run without any login."
         ),
         "workspace_ready": workspace_ready,
         "workspace_detail": (
-            "Ready for signed-in research and NotebookLM synthesis."
+            "Anonymous YouTube research is ready. Connect NotebookLM in your browser to run synthesis."
             if workspace_ready
-            else "Sign in with Google and make sure the NotebookLM backend is connected."
+            else "The Python backend is not ready."
         ),
+        "browser_notebooklm_supported": True,
         "skills": {
             "yt_research": str(
                 WORKSPACE_ROOT / "skills" / "yt-research" / "scripts" / "search_youtube.py"
@@ -241,16 +185,12 @@ def serialize_system_status() -> dict[str, Any]:
 
 
 def page_context(page_name: str, title: str) -> dict[str, Any]:
-    user = get_current_user()
     return {
         "title": title,
         "page_name": page_name,
-        "current_user": user,
-        "google_oauth_configured": google_oauth_configured(),
         "bootstrap": {
             "page": page_name,
-            "user": user,
-            "google_oauth_configured": google_oauth_configured(),
+            "browser_notebooklm_supported": True,
         },
     }
 
@@ -330,6 +270,21 @@ def run_yt_research(
     return payload
 
 
+def build_pipeline_env(auth_json: str | None) -> tuple[dict[str, str], Path | None]:
+    env = os.environ.copy()
+    env.setdefault("NOTEBOOKLM_HOME", str(NOTEBOOKLM_HOME))
+
+    if not auth_json:
+        return env, None
+
+    temp_home = Path(tempfile.mkdtemp(prefix="llmnotetube-auth-"))
+    storage_path = temp_home / "storage_state.json"
+    storage_path.write_text(auth_json, encoding="utf-8")
+    env["NOTEBOOKLM_HOME"] = str(temp_home)
+    env["NOTEBOOKLM_AUTH_JSON"] = auth_json
+    return env, temp_home
+
+
 def execute_notebooklm_pipeline(
     *,
     title: str,
@@ -342,7 +297,9 @@ def execute_notebooklm_pipeline(
     slide_deck_format: str,
     slide_deck_output_format: str,
     flashcards_format: str,
+    auth_json: str | None = None,
 ) -> dict[str, Any]:
+    pipeline_env, temp_home = build_pipeline_env(auth_json)
     with tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".json",
@@ -395,6 +352,7 @@ def execute_notebooklm_pipeline(
             text=True,
             timeout=timeout_seconds,
             encoding="utf-8",
+            env=pipeline_env,
         )
         if result.returncode != 0:
             raise RuntimeError(result.stderr or result.stdout or "Pipeline failed")
@@ -404,6 +362,8 @@ def execute_notebooklm_pipeline(
             urls_path.unlink(missing_ok=True)
         except OSError:
             pass
+        if temp_home is not None:
+            shutil.rmtree(temp_home, ignore_errors=True)
 
 
 def run_notebooklm_pipeline(job_id: str, **kwargs: Any) -> None:
@@ -439,6 +399,11 @@ def overview_page():
     return render_template("overview.html", **page_context("overview", "Overview"))
 
 
+@app.route("/connect")
+def connect_page():
+    return render_template("connect.html", **page_context("connect", "Connect"))
+
+
 @app.route("/workflow")
 def workflow_page():
     return render_template("workflow.html", **page_context("workflow", "Workflow"))
@@ -447,49 +412,7 @@ def workflow_page():
 @app.route("/workspace")
 def workspace_page():
     context = page_context("workspace", "Workspace")
-    context["workspace_access"] = get_current_user() is not None
     return render_template("workspace.html", **context)
-
-
-@app.route("/auth/login")
-def auth_login():
-    if not google_oauth_configured() or oauth is None:
-        return redirect(url_for("workspace_page"))
-
-    session["post_login_redirect"] = request.args.get("next") or url_for("workspace_page")
-    redirect_uri = url_for("auth_callback", _external=True)
-    return oauth.google.authorize_redirect(
-        redirect_uri,
-        prompt="select_account",
-    )
-
-
-@app.route("/auth/callback")
-def auth_callback():
-    if not google_oauth_configured() or oauth is None:
-        return redirect(url_for("overview_page"))
-
-    try:
-        token = oauth.google.authorize_access_token()
-        userinfo = token.get("userinfo")
-        if not userinfo:
-            userinfo = oauth.google.get("userinfo").json()
-        session["user"] = {
-            "email": userinfo.get("email"),
-            "name": userinfo.get("name") or userinfo.get("given_name") or "Google User",
-            "picture": userinfo.get("picture"),
-        }
-        session.permanent = True
-    except Exception:
-        session.pop("user", None)
-    return redirect(session.pop("post_login_redirect", url_for("workspace_page")))
-
-
-@app.route("/auth/logout")
-def auth_logout():
-    session.pop("user", None)
-    session.pop("post_login_redirect", None)
-    return redirect(url_for("overview_page"))
 
 
 @app.route("/healthz")
@@ -507,8 +430,31 @@ def api_auth_status():
     return jsonify(serialize_site_auth_status())
 
 
+@app.route("/api/notebooklm/validate", methods=["POST"])
+def api_notebooklm_validate():
+    data = request.get_json() or {}
+    auth_json = (data.get("auth_json") or "").strip()
+    if not auth_json:
+        return jsonify({"error": "auth_json is required"}), 400
+
+    try:
+        from notebooklm.auth import extract_cookies_from_storage
+
+        storage_state = json.loads(auth_json)
+        cookies = extract_cookies_from_storage(storage_state)
+    except Exception as exc:
+        return jsonify({"error": f"Invalid NotebookLM auth payload: {exc}"}), 400
+
+    return jsonify(
+        {
+            "valid": True,
+            "cookie_count": len(cookies),
+            "message": "NotebookLM auth JSON looks valid for this browser session.",
+        }
+    )
+
+
 @app.route("/api/yt-research", methods=["POST"])
-@api_login_required
 def api_yt_research():
     data = request.get_json() or {}
     query = (data.get("query") or "").strip()
@@ -530,7 +476,6 @@ def api_yt_research():
 
 
 @app.route("/api/notebooklm/pipeline", methods=["POST"])
-@api_login_required
 def api_notebooklm_pipeline():
     data = request.get_json() or {}
     title = (data.get("title") or "").strip()
@@ -543,6 +488,21 @@ def api_notebooklm_pipeline():
     urls_payload = urls_data if urls_data is not None else urls_list
     if not urls_payload:
         return jsonify({"error": "urls_data or urls_list is required"}), 400
+
+    provided_auth_json = (data.get("auth_json") or "").strip() or None
+    auth_source = get_notebooklm_auth_source()
+    if provided_auth_json is None and auth_source not in {"env", "storage-file"}:
+        return (
+            jsonify(
+                {
+                    "error": (
+                        "NotebookLM is not connected yet. Add a browser session on the Connect page "
+                        "or configure backend auth."
+                    )
+                }
+            ),
+            400,
+        )
 
     pipeline_kwargs = {
         "title": title,
@@ -558,6 +518,7 @@ def api_notebooklm_pipeline():
         "slide_deck_format": data.get("slide_deck_format", "detailed"),
         "slide_deck_output_format": data.get("slide_deck_output_format", "pptx"),
         "flashcards_format": data.get("flashcards_format", "markdown"),
+        "auth_json": provided_auth_json,
     }
 
     if should_run_pipeline_inline():
@@ -606,7 +567,6 @@ def api_notebooklm_pipeline():
 
 
 @app.route("/api/jobs")
-@api_login_required
 def api_jobs():
     with jobs_lock:
         payload = sorted(
@@ -618,7 +578,6 @@ def api_jobs():
 
 
 @app.route("/api/jobs/<job_id>")
-@api_login_required
 def api_job_status(job_id: str):
     with jobs_lock:
         job = jobs.get(job_id)
@@ -628,7 +587,6 @@ def api_job_status(job_id: str):
 
 
 @app.route("/outputs/notebooklm/<path:subpath>")
-@api_login_required
 def serve_artifact(subpath: str):
     safe_path = Path(subpath)
     if ".." in subpath or safe_path.is_absolute():

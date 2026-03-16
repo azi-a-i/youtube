@@ -4,41 +4,47 @@
   <section class="section-stack">
     <div class="section-heading">
       <p class="eyebrow">How it works</p>
-      <h1>The LLMNoteTube workflow is designed to move from topic to deliverable without losing context.</h1>
+      <h1>LLMNoteTube is built to move from topic to synthesis without hiding what is connected.</h1>
       <p class="hero-text">
-        The product is intentionally split into three stages so users can see what is ready,
-        what still needs setup, and where they are in the research journey.
+        The product is intentionally split into clear stages so users always know whether anonymous research,
+        NotebookLM access, and artifact generation are actually ready.
       </p>
     </div>
 
     <div class="process-grid">
       <article class="process-card">
         <span class="process-step">Stage 1</span>
-        <h3>Login and verify readiness</h3>
-        <p>Users authenticate with Google to unlock the workspace and immediately see whether research and NotebookLM services are online.</p>
+        <h3>Start with anonymous research</h3>
+        <p>Anyone can search YouTube by topic, review titles, views, channels, dates, and durations, then pick the strongest sources.</p>
       </article>
 
       <article class="process-card">
         <span class="process-step">Stage 2</span>
-        <h3>Search and curate sources</h3>
-        <p>Teams enter a topic, review structured video results, and select the exact URLs worth sending into the notebook.</p>
+        <h3>Connect NotebookLM when needed</h3>
+        <p>When users want synthesis, they connect a NotebookLM browser session on the Connect page or directly inside the workspace.</p>
       </article>
 
       <article class="process-card">
         <span class="process-step">Stage 3</span>
-        <h3>Analyze and generate outputs</h3>
-        <p>NotebookLM receives the chosen sources, produces synthesis, and can generate artifacts once the backend connection is ready.</p>
+        <h3>Run the synthesis pipeline</h3>
+        <p>The selected URLs move into NotebookLM, where the workspace can request summaries, comparisons, tactics, and deliverables.</p>
+      </article>
+
+      <article class="process-card">
+        <span class="process-step">Stage 4</span>
+        <h3>Download outputs</h3>
+        <p>Once the job finishes, users can review the analysis, inspect references, and download generated artifacts from one place.</p>
       </article>
     </div>
 
     <div class="workflow-notes">
       <article class="feature-card">
-        <p class="status-label">User experience</p>
-        <p>Overview introduces the product, Workflow explains the path, and Workspace is where authenticated users actually run the pipeline.</p>
+        <p class="status-label">Page structure</p>
+        <p>Overview introduces the product, Connect handles NotebookLM session setup, Workflow explains the path, and Workspace is where the full research run happens.</p>
       </article>
       <article class="feature-card">
-        <p class="status-label">Important backend note</p>
-        <p>Google sign-in controls access to the site, while NotebookLM still depends on the backend having its own valid NotebookLM connection.</p>
+        <p class="status-label">Important note</p>
+        <p>LLMNoteTube does not require a site account. NotebookLM still needs either a browser-provided session or a backend session configured by the deployment.</p>
       </article>
     </div>
   </section>

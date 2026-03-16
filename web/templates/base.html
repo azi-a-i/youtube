@@ -6,7 +6,7 @@
   <title>{{ title }} | LLMNoteTube</title>
   <meta
     name="description"
-    content="LLMNoteTube helps teams research topics through YouTube discovery and NotebookLM synthesis."
+    content="LLMNoteTube helps you research with anonymous YouTube discovery and a connected NotebookLM workspace."
   />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -30,54 +30,34 @@
     <nav class="site-nav">
       <a href="{{ url_for('overview_page') }}" class="{% if page_name == 'overview' %}is-active{% endif %}">Overview</a>
       <a href="{{ url_for('workflow_page') }}" class="{% if page_name == 'workflow' %}is-active{% endif %}">Workflow</a>
+      <a href="{{ url_for('connect_page') }}" class="{% if page_name == 'connect' %}is-active{% endif %}">Connect</a>
       <a href="{{ url_for('workspace_page') }}" class="{% if page_name == 'workspace' %}is-active{% endif %}">Workspace</a>
     </nav>
 
     <div class="site-actions">
-      {% if current_user %}
-        <div class="user-chip">
-          {% if current_user.picture %}
-            <img src="{{ current_user.picture }}" alt="{{ current_user.name }}" class="user-avatar" />
-          {% endif %}
-          <div>
-            <strong>{{ current_user.name }}</strong>
-            <span>{{ current_user.email }}</span>
-          </div>
-        </div>
-        <a href="{{ url_for('auth_logout') }}" class="button button-ghost button-small">Log out</a>
-      {% elif google_oauth_configured %}
-        <a href="{{ url_for('auth_login', next=request.path) }}" class="button button-primary button-small">
-          Login with Google
-        </a>
-      {% else %}
-        <span class="status-pill status-pill-warning">Google login not configured</span>
-      {% endif %}
+      <span class="status-pill">Anonymous research</span>
+      <a href="{{ url_for('connect_page') }}" class="button button-ghost button-small">Connect NotebookLM</a>
+      <a href="{{ url_for('workspace_page') }}" class="button button-primary button-small">Open workspace</a>
     </div>
   </header>
 
   <section class="status-ribbon">
     <article class="status-panel">
-      <p class="status-label">Google account</p>
-      <strong id="site-auth-state">{% if current_user %}Connected{% else %}Not connected{% endif %}</strong>
-      <span id="site-auth-detail">
-        {% if current_user %}
-          {{ current_user.email }}
-        {% else %}
-          Sign in to unlock the workspace.
-        {% endif %}
-      </span>
-    </article>
-
-    <article class="status-panel">
       <p class="status-label">Research engine</p>
       <strong id="research-state">Checking runtime</strong>
-      <span id="research-detail">YouTube metadata search depends on the Python backend.</span>
+      <span id="research-detail">YouTube search is being checked.</span>
     </article>
 
     <article class="status-panel">
-      <p class="status-label">NotebookLM backend</p>
-      <strong id="notebook-state">Checking connection</strong>
-      <span id="notebook-detail">Waiting for backend readiness.</span>
+      <p class="status-label">NotebookLM session</p>
+      <strong id="notebook-state">Checking browser</strong>
+      <span id="notebook-detail">Connect NotebookLM in this browser to unlock synthesis.</span>
+    </article>
+
+    <article class="status-panel">
+      <p class="status-label">Backend runtime</p>
+      <strong id="runtime-state">Checking runtime</strong>
+      <span id="runtime-detail">Python and shared backend auth are being checked.</span>
     </article>
 
     <article class="status-panel">
@@ -92,7 +72,7 @@
   </main>
 
   <footer class="site-footer">
-    <p>LLMNoteTube blends topic research, source curation, and NotebookLM synthesis into one guided workspace.</p>
+    <p>LLMNoteTube turns topic discovery into a cleaner NotebookLM workflow without requiring a separate site account.</p>
   </footer>
 
   <script>
