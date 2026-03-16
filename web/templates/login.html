@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="login-card">
+    <div class="login-copy">
+      <p class="eyebrow">Protected workspace</p>
+      <h1>Login to access LLMNoteTube.</h1>
+      <p class="hero-text">
+        Enter your email and password to open the workspace. Inside, you can search YouTube anonymously
+        and run NotebookLM analysis through the connected backend.
+      </p>
+    </div>
+
+    <form action="{{ url_for('login_page') }}" method="post" class="login-form">
+      <label class="field">
+        <span>Email</span>
+        <input type="email" name="email" placeholder="you@example.com" required />
+      </label>
+
+      <label class="field">
+        <span>Password</span>
+        <input type="password" name="password" placeholder="Password" required />
+      </label>
+
+      <button type="submit" class="button button-primary login-button">Login</button>
+
+      {% if login_error %}
+        <div class="message message-error">{{ login_error }}</div>
+      {% endif %}
+
+      {% if show_demo_credentials %}
+        <div class="message message-info">
+          Demo login for this deployment: <strong>{{ demo_email }}</strong> / <strong>{{ demo_password }}</strong>
+        </div>
+      {% endif %}
+    </form>
+  </section>
+{% endblock %}

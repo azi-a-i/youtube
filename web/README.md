@@ -1,17 +1,11 @@
 # LLMNoteTube Web App
 
-LLMNoteTube is a three-page web product for:
+This version of LLMNoteTube is intentionally minimal:
 
-- anonymous YouTube topic research
-- browser-connected NotebookLM synthesis
-- artifact generation from one workspace
-
-Pages:
-
-- `Overview`
-- `Workflow`
-- `Connect`
-- `Workspace`
+- a simple email/password login gate
+- anonymous YouTube search inside the protected workspace
+- a backend NotebookLM wrapper powered by `notebooklm-py`
+- downloadable NotebookLM output in `PDF`, `TXT`, or `DOCX`
 
 ## Local development
 
@@ -23,68 +17,40 @@ cmd /c npm install
 .\run-web.cmd
 ```
 
-Then open `http://localhost:5000`.
+Then open `http://localhost:5000/login`.
 
-## NotebookLM connection model
+## Login credentials
 
-LLMNoteTube does not require a Google site login.
+By default the app uses:
 
-YouTube search works anonymously as long as the Python backend is available.
+- email: `demo@llmnotetube.app`
+- password: `llmnotetube`
 
-NotebookLM synthesis requires one of these:
+Override them with:
 
-- a browser-provided NotebookLM session pasted into the `Connect` page or the workspace connection panel
-- a deployment-level `NOTEBOOKLM_HOME` / `storage_state.json`
-- a deployment-level `NOTEBOOKLM_AUTH_JSON`
+- `WORKSPACE_LOGIN_EMAIL`
+- `WORKSPACE_LOGIN_PASSWORD`
 
-The browser connection flow validates the pasted `storage_state.json` contents and then includes that session in NotebookLM pipeline requests from the workspace.
+## NotebookLM backend auth
+
+This build uses backend NotebookLM auth. Before live NotebookLM runs, authenticate the local or deployed environment once with:
+
+```powershell
+.\notebooklm.cmd login
+```
+
+The workspace `Connect NotebookLM` button checks whether that backend connection is ready.
 
 ## Frontend source
 
 - templates: `web/templates/`
-- TypeScript source: `web/frontend/app.ts`
-- compiled browser bundle: `web/static/app.js`
+- source: `web/frontend/app.ts`
+- compiled bundle: `web/static/app.js`
 
-Useful commands from the repo root:
+Useful commands:
 
 ```powershell
 cmd /c npm run check:web
 cmd /c npm run build:web
 python scripts/sync_public.py
 ```
-
-## Hosted deployment
-
-This app can render on Vercel, but the full NotebookLM pipeline is still better on a persistent Python host because it:
-
-- launches Python subprocesses for `yt-dlp` and `notebooklm-py`
-- writes generated artifacts to disk
-- benefits from persistent auth storage and background job continuity
-
-### Included deployment files
-
-- root `requirements.txt`
-- root `app.py`
-- `api/index.py`
-- root `pyproject.toml`
-- `wsgi.py`
-- `render.yaml`
-- `Dockerfile`
-- `Procfile`
-- `vercel.json`
-
-### Environment variables
-
-- `PORT`: port provided by your host
-- `APP_SECRET_KEY`: optional Flask secret key
-- `OUTPUTS_ROOT`: where generated NotebookLM files should be stored
-- `NOTEBOOKLM_HOME`: where file-based NotebookLM state should live
-- `NOTEBOOKLM_AUTH_JSON`: optional shared NotebookLM session for the whole deployment
-
-## Usage
-
-1. Open `Overview` for the product intro.
-2. Open `Connect` if you want to attach a NotebookLM browser session.
-3. Use `Workspace` to search YouTube, curate videos, and run NotebookLM synthesis.
-
-Generated artifacts are saved under `outputs/notebooklm/<notebook-slug>/` locally, or under your configured `OUTPUTS_ROOT` in production.

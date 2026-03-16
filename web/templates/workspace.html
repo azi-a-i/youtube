@@ -1,284 +1,132 @@
 {% extends "base.html" %}
 
 {% block content %}
-  <section class="section-heading workspace-heading">
-    <p class="eyebrow">Research studio</p>
-    <h1>Workspace</h1>
-    <p class="hero-text">
-      Search YouTube without logging in, connect NotebookLM when you want synthesis, and run the full LLMNoteTube workflow from one place.
-    </p>
+  <section class="workspace-hero">
+    <div>
+      <p class="eyebrow">Workspace</p>
+      <h1>Search YouTube and send sources into NotebookLM.</h1>
+      <p class="hero-text">
+        Use the search box to find videos, add URLs into the source field, connect the NotebookLM backend,
+        and display the generated response directly in this interface.
+      </p>
+    </div>
   </section>
 
   <section class="workspace-grid">
-    <section class="studio-column">
-      <article class="panel panel-primary" id="search-panel">
-        <div class="panel-head">
-          <div>
-            <p class="panel-kicker">Step 1</p>
-            <h3>YouTube research</h3>
-          </div>
-          <p class="panel-copy">Search by topic, inspect metadata, and select the videos worth sending into NotebookLM.</p>
+    <article class="panel panel-primary">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">YouTube Research</p>
+          <h3>Anonymous search</h3>
         </div>
+        <p class="panel-copy">Search by topic and collect simple video titles and URLs.</p>
+      </div>
 
-        <form id="yt-form" class="form-grid">
-          <label class="field field-wide">
-            <span>Topic or query</span>
-            <input
-              type="text"
-              id="query"
-              name="query"
-              placeholder="e.g. ai coding agents, creator education, startup strategy"
-              required
-            />
-          </label>
+      <form id="yt-form" class="form-grid form-grid-compact">
+        <label class="field field-wide">
+          <span>Search query</span>
+          <input type="text" id="query" name="query" placeholder="e.g. ai agents, startup strategy, creator economy" required />
+        </label>
 
-          <label class="field">
-            <span>Video count</span>
-            <input type="number" id="count" name="count" min="5" max="50" value="25" />
-          </label>
+        <label class="field">
+          <span>Results</span>
+          <input type="number" id="count" name="count" min="5" max="25" value="12" />
+        </label>
 
-          <label class="field">
-            <span>Search mode</span>
-            <select id="search_mode" name="search_mode">
-              <option value="latest">Latest leaning</option>
-              <option value="relevance">Relevance leaning</option>
-            </select>
-          </label>
-
-          <label class="field">
-            <span>Rank by</span>
-            <select id="sort" name="sort">
-              <option value="views">Views</option>
-              <option value="latest">Upload date</option>
-            </select>
-          </label>
-
-          <div class="form-actions field-wide">
-            <button type="submit" class="button button-primary" id="yt-submit">Search YouTube</button>
-            <button type="button" class="button button-ghost" id="clear-results">Clear results</button>
-          </div>
-        </form>
-
-        <div id="yt-status" class="message" hidden></div>
-        <div id="yt-warning" class="message message-warning" hidden></div>
-
-        <section class="results-shell" id="yt-results" hidden>
-          <div class="results-toolbar">
-            <div>
-              <p class="status-label">Search summary</p>
-              <p class="results-meta" id="yt-meta"></p>
-            </div>
-
-            <div class="toolbar-actions">
-              <button type="button" class="button button-ghost button-small" id="select-all-videos">Select all</button>
-              <button type="button" class="button button-ghost button-small" id="clear-selection">Clear selection</button>
-              <button type="button" class="button button-secondary button-small" id="copy-selected-urls">Copy URLs</button>
-              <button type="button" class="button button-primary button-small" id="use-in-notebooklm">Send to NotebookLM</button>
-            </div>
-          </div>
-
-          <div class="selection-ribbon">
-            <strong id="selection-count">0 selected</strong>
-            <span>Only selected videos move into the notebook composer.</span>
-          </div>
-
-          <div class="video-grid" id="video-grid"></div>
-        </section>
-      </article>
-    </section>
-
-    <section class="studio-column">
-      <article class="panel panel-secondary" id="connection-panel">
-        <div class="panel-head">
-          <div>
-            <p class="panel-kicker">Step 2</p>
-            <h3>NotebookLM connection</h3>
-          </div>
-          <p class="panel-copy">Connect a NotebookLM browser session here, or manage it on the dedicated Connect page.</p>
+        <div class="form-actions">
+          <button type="submit" class="button button-primary" id="yt-submit">Search</button>
+          <button type="button" class="button button-ghost" id="clear-results">Clear</button>
         </div>
+      </form>
 
-        <div class="summary-grid compact-summary">
-          <div class="summary-card">
-            <span class="status-label">Session state</span>
-            <strong id="workspace-session-state">Not connected</strong>
-            <span id="workspace-session-detail">Add a NotebookLM session to power synthesis in this browser.</span>
-          </div>
-          <div class="summary-card">
-            <span class="status-label">Quick action</span>
-            <strong>Connect or refresh</strong>
-            <span><a href="{{ url_for('connect_page') }}">Open the full Connect page</a> if you want setup guidance.</span>
+      <div id="yt-status" class="message" hidden></div>
+
+      <section id="yt-results" class="results-shell" hidden>
+        <div class="results-toolbar">
+          <p class="results-meta" id="yt-meta"></p>
+          <div class="toolbar-actions">
+            <button type="button" class="button button-secondary button-small" id="add-selected-sources">Add selected</button>
           </div>
         </div>
 
-        <form id="workspace-connect-form" class="form-grid">
-          <label class="field field-wide">
-            <span>NotebookLM auth JSON</span>
-            <textarea
-              id="workspace-connect-auth-json"
-              name="auth_json"
-              rows="5"
-              placeholder='Paste the contents of your NotebookLM storage_state.json here.'
-            ></textarea>
-          </label>
+        <div class="video-list" id="video-list"></div>
+      </section>
+    </article>
 
-          <div class="form-actions field-wide">
-            <button type="submit" class="button button-primary">Connect NotebookLM</button>
-            <button type="button" class="button button-ghost" id="workspace-clear-connect">Clear session</button>
-          </div>
-        </form>
-
-        <div id="workspace-connect-status" class="message" hidden></div>
-      </article>
-
-      <article class="panel panel-secondary sticky-panel" id="pipeline-panel">
-        <div class="panel-head">
-          <div>
-            <p class="panel-kicker">Step 3</p>
-            <h3>NotebookLM synthesis</h3>
-          </div>
-          <p class="panel-copy">Import selected URLs, shape the question, and request deliverables from NotebookLM.</p>
+    <article class="panel panel-secondary">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">NotebookLM</p>
+          <h3>Backend wrapper</h3>
         </div>
+        <p class="panel-copy">Connect the backend and run analysis on pasted YouTube URLs.</p>
+      </div>
 
-        <div id="workspace-note" class="message message-info">
-          You can search YouTube anonymously. Add a NotebookLM session above when you are ready to run synthesis.
+      <div class="inline-action-row">
+        <button type="button" class="button button-secondary" id="connect-notebooklm">Connect NotebookLM</button>
+        <div id="notebooklm-connect-status" class="message-inline"></div>
+      </div>
+
+      <form id="nl-form" class="form-grid">
+        <label class="field field-wide">
+          <span>Notebook title</span>
+          <input type="text" id="nl-title" name="title" placeholder="LLMNoteTube Research" required />
+        </label>
+
+        <label class="field field-wide">
+          <span>Sources</span>
+          <textarea id="nl-sources" name="sources" rows="8" placeholder="Paste YouTube URLs or lines containing YouTube URLs."></textarea>
+        </label>
+
+        <label class="field field-wide">
+          <span>Prompt</span>
+          <textarea id="nl-prompt" name="prompt" rows="5" placeholder="Summarize the strongest findings across these videos."></textarea>
+        </label>
+
+        <div class="form-actions field-wide">
+          <button type="submit" class="button button-primary" id="nl-submit">Run NotebookLM</button>
         </div>
+      </form>
 
-        <form id="nl-form" class="form-grid">
-          <label class="field field-wide">
-            <span>Notebook title</span>
-            <input type="text" id="nl-title" name="title" placeholder="LLMNoteTube Research: AI Agents" required />
-          </label>
+      <div id="nl-status" class="message" hidden></div>
 
-          <label class="field field-wide">
-            <span>URLs or yt-research JSON</span>
-            <textarea id="nl-urls" name="urls" rows="6" placeholder="Paste one URL per line, or send selected YouTube results here."></textarea>
-          </label>
-
-          <label class="field field-wide">
-            <span>Analysis prompt</span>
-            <textarea id="nl-analysis" name="analysis_prompt" rows="4" placeholder="Summarize the strongest themes, disagreements, and actionable takeaways."></textarea>
-          </label>
-
-          <div class="preset-row field-wide">
-            <button type="button" class="chip-button" data-prompt="Summarize the strongest recurring themes across these videos and explain why they matter.">Themes</button>
-            <button type="button" class="chip-button" data-prompt="Compare the top viewpoints, disagreements, and blind spots across these videos.">Compare viewpoints</button>
-            <button type="button" class="chip-button" data-prompt="Extract the most actionable tactics, frameworks, and examples from these videos.">Actionable tactics</button>
-          </div>
-
-          <div class="field field-wide">
-            <span>Artifact bundle</span>
-            <div class="artifact-picker">
-              <label class="artifact-option">
-                <input type="checkbox" name="artifact" value="infographic" checked />
-                <span>Infographic</span>
-              </label>
-              <label class="artifact-option">
-                <input type="checkbox" name="artifact" value="slide-deck" />
-                <span>Slide deck</span>
-              </label>
-              <label class="artifact-option">
-                <input type="checkbox" name="artifact" value="flashcards" />
-                <span>Flashcards</span>
-              </label>
-            </div>
-          </div>
-
-          <details class="advanced-panel field-wide">
-            <summary>Fine tune the output</summary>
-            <div class="advanced-grid">
-              <label class="field field-wide">
-                <span>Artifact instructions</span>
-                <input
-                  type="text"
-                  id="nl-artifact-instructions"
-                  name="artifact_instructions"
-                  placeholder="e.g. handwritten chalkboard style, bold iconography, concise captions"
-                />
-              </label>
-
-              <label class="field">
-                <span>Infographic style</span>
-                <select id="nl-infographic-style" name="infographic_style">
-                  <option value="auto">Auto</option>
-                  <option value="sketch-note">Sketch note</option>
-                  <option value="professional">Professional</option>
-                  <option value="bento-grid">Bento grid</option>
-                  <option value="editorial">Editorial</option>
-                  <option value="instructional">Instructional</option>
-                  <option value="scientific">Scientific</option>
-                </select>
-              </label>
-
-              <label class="field">
-                <span>Slide deck file</span>
-                <select id="nl-slide-format" name="slide_deck_output_format">
-                  <option value="pptx">PPTX</option>
-                  <option value="pdf">PDF</option>
-                </select>
-              </label>
-
-              <label class="field">
-                <span>Flashcards file</span>
-                <select id="nl-flashcards-format" name="flashcards_format">
-                  <option value="markdown">Markdown</option>
-                  <option value="json">JSON</option>
-                  <option value="html">HTML</option>
-                </select>
-              </label>
-            </div>
-          </details>
-
-          <div class="form-actions field-wide">
-            <button type="submit" class="button button-primary" id="nl-submit">Run NotebookLM pipeline</button>
-            <button type="button" class="button button-ghost" id="clear-pipeline">Reset</button>
-          </div>
-        </form>
-
-        <div id="nl-status" class="message" hidden></div>
-
-        <section class="activity-card" id="nl-job-progress" hidden>
-          <div class="activity-copy">
-            <p class="status-label">Live job status</p>
-            <h4 id="job-stage">Queued</h4>
-            <p id="job-helper">The page will poll automatically while the backend works.</p>
-          </div>
-          <div class="progress-track">
-            <div class="progress-bar" id="job-progress-bar"></div>
-          </div>
-        </section>
-      </article>
-
-      <article class="panel panel-tertiary" id="result-panel" hidden>
-        <div class="panel-head">
-          <div>
-            <p class="panel-kicker">Step 4</p>
-            <h3>Outputs</h3>
-          </div>
-          <p class="panel-copy">Review the synthesis, inspect citations, and download every generated artifact.</p>
+      <section class="activity-card" id="nl-job-progress" hidden>
+        <div class="activity-copy">
+          <p class="status-label">NotebookLM</p>
+          <h4 id="job-stage">Queued</h4>
+          <p id="job-helper">The workspace will update automatically when the response is ready.</p>
         </div>
+        <div class="progress-track">
+          <div class="progress-bar" id="job-progress-bar"></div>
+        </div>
+      </section>
+    </article>
+  </section>
 
-        <div class="summary-grid" id="result-summary"></div>
+  <section class="panel panel-tertiary result-panel" id="result-panel" hidden>
+    <div class="panel-head">
+      <div>
+        <p class="panel-kicker">NotebookLM Output</p>
+        <h3 id="result-title">Generated response</h3>
+      </div>
+      <p class="panel-copy">Read the output below, then download it in your preferred format.</p>
+    </div>
 
-        <section class="analysis-block">
-          <div class="analysis-head">
-            <p class="status-label">NotebookLM analysis</p>
-            <span class="pill" id="citation-count">0 references</span>
-          </div>
-          <div class="analysis-body" id="analysis-answer"></div>
-        </section>
+    <div class="analysis-body" id="analysis-answer"></div>
 
-        <section>
-          <div class="analysis-head">
-            <p class="status-label">Downloads</p>
-          </div>
-          <div class="artifact-downloads" id="nl-artifacts"></div>
-        </section>
+    <div class="download-row">
+      <label class="field download-field">
+        <span>Download format</span>
+        <select id="download-format" name="download_format">
+          <option value="pdf">PDF</option>
+          <option value="txt">TXT</option>
+          <option value="docx">DOCX</option>
+        </select>
+      </label>
 
-        <details class="advanced-panel">
-          <summary>Inspect raw pipeline JSON</summary>
-          <pre class="raw-json" id="raw-json"></pre>
-        </details>
-      </article>
-    </section>
+      <button type="button" class="button button-primary" id="download-output">Download output</button>
+    </div>
+
+    <pre class="raw-json" id="raw-json" hidden></pre>
   </section>
 {% endblock %}

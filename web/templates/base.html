@@ -4,10 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{ title }} | LLMNoteTube</title>
-  <meta
-    name="description"
-    content="LLMNoteTube helps you research with anonymous YouTube discovery and a connected NotebookLM workspace."
-  />
+  <meta name="description" content="LLMNoteTube is a protected research workspace for YouTube discovery and NotebookLM analysis." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -21,59 +18,25 @@
   <div class="page-glow glow-b"></div>
   <div class="page-grid"></div>
 
-  <header class="site-header">
-    <a class="brand-mark" href="{{ url_for('overview_page') }}">
-      <span class="brand-mark-dot"></span>
-      <span>LLMNoteTube</span>
-    </a>
+  {% if current_user %}
+    <header class="site-header">
+      <a class="brand-mark" href="{{ url_for('workspace_page') }}">
+        <span class="brand-mark-dot"></span>
+        <span>LLMNoteTube</span>
+      </a>
 
-    <nav class="site-nav">
-      <a href="{{ url_for('overview_page') }}" class="{% if page_name == 'overview' %}is-active{% endif %}">Overview</a>
-      <a href="{{ url_for('workflow_page') }}" class="{% if page_name == 'workflow' %}is-active{% endif %}">Workflow</a>
-      <a href="{{ url_for('connect_page') }}" class="{% if page_name == 'connect' %}is-active{% endif %}">Connect</a>
-      <a href="{{ url_for('workspace_page') }}" class="{% if page_name == 'workspace' %}is-active{% endif %}">Workspace</a>
-    </nav>
+      <div class="site-actions">
+        <span class="user-badge">{{ current_user }}</span>
+        <form action="{{ url_for('logout_page') }}" method="post">
+          <button type="submit" class="button button-ghost button-small">Logout</button>
+        </form>
+      </div>
+    </header>
+  {% endif %}
 
-    <div class="site-actions">
-      <span class="status-pill">Anonymous research</span>
-      <a href="{{ url_for('connect_page') }}" class="button button-ghost button-small">Connect NotebookLM</a>
-      <a href="{{ url_for('workspace_page') }}" class="button button-primary button-small">Open workspace</a>
-    </div>
-  </header>
-
-  <section class="status-ribbon">
-    <article class="status-panel">
-      <p class="status-label">Research engine</p>
-      <strong id="research-state">Checking runtime</strong>
-      <span id="research-detail">YouTube search is being checked.</span>
-    </article>
-
-    <article class="status-panel">
-      <p class="status-label">NotebookLM session</p>
-      <strong id="notebook-state">Checking browser</strong>
-      <span id="notebook-detail">Connect NotebookLM in this browser to unlock synthesis.</span>
-    </article>
-
-    <article class="status-panel">
-      <p class="status-label">Backend runtime</p>
-      <strong id="runtime-state">Checking runtime</strong>
-      <span id="runtime-detail">Python and shared backend auth are being checked.</span>
-    </article>
-
-    <article class="status-panel">
-      <p class="status-label">Workspace</p>
-      <strong id="workspace-state">Checking access</strong>
-      <span id="workspace-detail">Status will update after the page loads.</span>
-    </article>
-  </section>
-
-  <main class="page-shell">
+  <main class="page-shell {% if page_name == 'login' %}login-shell{% endif %}">
     {% block content %}{% endblock %}
   </main>
-
-  <footer class="site-footer">
-    <p>LLMNoteTube turns topic discovery into a cleaner NotebookLM workflow without requiring a separate site account.</p>
-  </footer>
 
   <script>
     window.LLMNOTETUBE_BOOTSTRAP = {{ bootstrap | tojson }};

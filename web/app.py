@@ -1,26 +1,34 @@
 #!/usr/bin/env python
-"""Flask app for the LLMNoteTube interactive web UI."""
+"""Flask app for the simplified LLMNoteTube workspace."""
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import uuid
+import zipfile
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
+from xml.sax.saxutils import escape as xml_escape
 
 from flask import (
     Flask,
     jsonify,
+    redirect,
     render_template,
     request,
-    send_from_directory,
+    send_file,
+    session,
+    url_for,
 )
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -40,10 +48,11 @@ NOTEBOOKLM_HOME = Path(
 NOTEBOOKLM_STORAGE = Path(
     os.environ.get("NOTEBOOKLM_STORAGE", str(NOTEBOOKLM_HOME / "storage_state.json"))
 ).resolve()
-NOTEBOOKLM_CONTEXT = Path(
-    os.environ.get("NOTEBOOKLM_CONTEXT", str(NOTEBOOKLM_HOME / "context.json"))
-).resolve()
 DEFAULT_SECRET_KEY = "llmnotetube-dev-secret-key"
+DEFAULT_LOGIN_EMAIL = "demo@llmnotetube.app"
+DEFAULT_LOGIN_PASSWORD = "llmnotetube"
+URL_RE = re.compile(r"https?://[^\s<>\"]+")
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 def env_truthy(name: str) -> bool:
@@ -81,13 +90,56 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=env_truthy("SESSION_COOKIE_SECURE") or bool(os.environ.get("VERCEL")),
-    PERMANENT_SESSION_LIFETIME=timedelta(days=14),
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
 )
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 CORS(app, supports_credentials=True)
 
 jobs: dict[str, dict[str, Any]] = {}
 jobs_lock = threading.Lock()
+
+
+def configured_login_email() -> str:
+    return os.environ.get("WORKSPACE_LOGIN_EMAIL", DEFAULT_LOGIN_EMAIL)
+
+
+def configured_login_password() -> str:
+    return os.environ.get("WORKSPACE_LOGIN_PASSWORD", DEFAULT_LOGIN_PASSWORD)
+
+
+def using_demo_credentials() -> bool:
+    return (
+        configured_login_email() == DEFAULT_LOGIN_EMAIL
+        and configured_login_password() == DEFAULT_LOGIN_PASSWORD
+    )
+
+
+def get_current_user() -> str | None:
+    user_email = session.get("user_email")
+    return user_email if isinstance(user_email, str) and user_email else None
+
+
+def login_required(view: F) -> F:
+    @wraps(view)
+    def wrapped(*args: Any, **kwargs: Any):
+        if not get_current_user():
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Login required."}), 401
+            return redirect(url_for("login_page"))
+        return view(*args, **kwargs)
+
+    return wrapped  # type: ignore[return-value]
+
+
+def page_context(page_name: str, title: str) -> dict[str, Any]:
+    return {
+        "title": title,
+        "page_name": page_name,
+        "current_user": get_current_user(),
+        "bootstrap": {
+            "page": page_name,
+        },
+    }
 
 
 def get_python_command() -> str:
@@ -110,10 +162,6 @@ def get_python_command() -> str:
     return shutil.which("python") or shutil.which("python3") or "python"
 
 
-def is_python_ready(command: str) -> bool:
-    return Path(command).exists() or shutil.which(command) is not None
-
-
 def get_notebooklm_auth_source() -> str:
     auth_json = os.environ.get("NOTEBOOKLM_AUTH_JSON")
     if auth_json is not None and auth_json.strip():
@@ -125,74 +173,8 @@ def get_notebooklm_auth_source() -> str:
     return "missing"
 
 
-def serialize_site_auth_status() -> dict[str, Any]:
-    return {
-        "authenticated": False,
-        "provider": None,
-        "mode": "none",
-        "message": "LLMNoteTube does not require a site account.",
-    }
-
-
-def serialize_system_status() -> dict[str, Any]:
-    python_command = get_python_command()
-    python_ready = is_python_ready(python_command)
-    auth_source = get_notebooklm_auth_source()
-    notebooklm_ready = auth_source in {"env", "storage-file"} and python_ready
-    site_auth = serialize_site_auth_status()
-    workspace_ready = python_ready
-
-    return {
-        "workspace_root": str(WORKSPACE_ROOT),
-        "python_executable": python_command,
-        "python_ready": python_ready,
-        "server_mode": "production" if os.environ.get("PORT") else "local",
-        "port": os.environ.get("PORT", "5000"),
-        "pipeline_delivery_mode": "direct" if should_run_pipeline_inline() else "background",
-        "site_auth": site_auth,
-        "yt_research_ready": python_ready,
-        "anonymous_research_ready": python_ready,
-        "notebooklm_home": str(NOTEBOOKLM_HOME),
-        "notebooklm_ready": notebooklm_ready,
-        "auth_ready": notebooklm_ready,
-        "auth_source": auth_source,
-        "auth_env_var": "NOTEBOOKLM_AUTH_JSON",
-        "storage_state_path": str(NOTEBOOKLM_STORAGE),
-        "context_path": str(NOTEBOOKLM_CONTEXT),
-        "outputs_root": str(OUTPUTS_ROOT),
-        "login_command": r".\notebooklm.cmd login",
-        "run_command": r".\run-web.cmd",
-        "deploy_auth_hint": (
-            "NotebookLM needs either backend auth or a browser-provided auth JSON session. "
-            "YouTube research can run without any login."
-        ),
-        "workspace_ready": workspace_ready,
-        "workspace_detail": (
-            "Anonymous YouTube research is ready. Connect NotebookLM in your browser to run synthesis."
-            if workspace_ready
-            else "The Python backend is not ready."
-        ),
-        "browser_notebooklm_supported": True,
-        "skills": {
-            "yt_research": str(
-                WORKSPACE_ROOT / "skills" / "yt-research" / "scripts" / "search_youtube.py"
-            ),
-            "notebooklm": str(
-                WORKSPACE_ROOT / "skills" / "notebooklm" / "scripts" / "notebooklm_pipeline.py"
-            ),
-        },
-    }
-
-
-def page_context(page_name: str, title: str) -> dict[str, Any]:
-    return {
-        "title": title,
-        "page_name": page_name,
-        "bootstrap": {
-            "page": page_name,
-            "browser_notebooklm_supported": True,
-        },
-    }
+def notebooklm_backend_ready() -> bool:
+    return get_notebooklm_auth_source() in {"env", "storage-file"}
 
 
 def set_job(job_id: str, payload: dict[str, Any]) -> None:
@@ -209,36 +191,7 @@ def update_job(job_id: str, **changes: Any) -> None:
         job["updated_at"] = now_iso()
 
 
-def list_artifact_links(result_payload: dict[str, Any]) -> list[dict[str, str | None]]:
-    artifacts_list: list[dict[str, str | None]] = []
-    for artifact in result_payload.get("artifacts") or []:
-        path_str = artifact.get("output_path")
-        if not path_str:
-            continue
-        output_path = Path(path_str)
-        try:
-            rel = output_path.relative_to(OUTPUTS_ROOT)
-            url = f"/outputs/notebooklm/{rel.as_posix()}"
-        except ValueError:
-            url = None
-        artifacts_list.append(
-            {
-                "name": output_path.name,
-                "kind": artifact.get("artifact"),
-                "url": url,
-            }
-        )
-    return artifacts_list
-
-
-def run_yt_research(
-    query: str,
-    count: int = 25,
-    search_mode: str = "latest",
-    sort: str = "views",
-    pool_size: int | None = None,
-) -> dict[str, Any]:
-    pool = pool_size or max(count, count * 3)
+def run_yt_research(query: str, count: int = 12) -> dict[str, Any]:
     script = WORKSPACE_ROOT / "skills" / "yt-research" / "scripts" / "search_youtube.py"
     cmd = [
         get_python_command(),
@@ -248,58 +201,42 @@ def run_yt_research(
         "--count",
         str(count),
         "--search-mode",
-        search_mode,
+        "relevance",
         "--sort",
-        sort,
+        "views",
         "--pool-size",
-        str(pool),
+        str(max(count * 2, count)),
     ]
     result = subprocess.run(
         cmd,
         cwd=str(WORKSPACE_ROOT),
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=180,
         encoding="utf-8",
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr or result.stdout or "yt-research failed")
+
     payload = json.loads(result.stdout)
-    warnings = [line.strip() for line in result.stderr.splitlines() if line.strip()]
-    payload["warnings"] = warnings
-    return payload
+    videos = payload.get("videos") or []
+    simplified = [
+        {
+            "title": item.get("title"),
+            "url": item.get("url"),
+        }
+        for item in videos
+        if item.get("title") and item.get("url")
+    ]
+    return {"query": query, "videos": simplified[:count]}
 
 
-def build_pipeline_env(auth_json: str | None) -> tuple[dict[str, str], Path | None]:
-    env = os.environ.copy()
-    env.setdefault("NOTEBOOKLM_HOME", str(NOTEBOOKLM_HOME))
-
-    if not auth_json:
-        return env, None
-
-    temp_home = Path(tempfile.mkdtemp(prefix="llmnotetube-auth-"))
-    storage_path = temp_home / "storage_state.json"
-    storage_path.write_text(auth_json, encoding="utf-8")
-    env["NOTEBOOKLM_HOME"] = str(temp_home)
-    env["NOTEBOOKLM_AUTH_JSON"] = auth_json
-    return env, temp_home
-
-
-def execute_notebooklm_pipeline(
+def execute_notebooklm_analysis(
     *,
     title: str,
     urls_data: dict[str, Any] | list[str],
     analysis_prompt: str,
-    artifacts: list[str],
-    artifact_instructions: str | None,
-    infographic_style: str,
-    infographic_orientation: str,
-    slide_deck_format: str,
-    slide_deck_output_format: str,
-    flashcards_format: str,
-    auth_json: str | None = None,
 ) -> dict[str, Any]:
-    pipeline_env, temp_home = build_pipeline_env(auth_json)
     with tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".json",
@@ -315,7 +252,6 @@ def execute_notebooklm_pipeline(
     try:
         script = WORKSPACE_ROOT / "skills" / "notebooklm" / "scripts" / "notebooklm_pipeline.py"
         OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
-
         cmd = [
             get_python_command(),
             str(script),
@@ -328,22 +264,7 @@ def execute_notebooklm_pipeline(
             analysis_prompt or "Summarize the top findings across these sources.",
             "--output-dir",
             str(OUTPUTS_ROOT),
-            "--infographic-style",
-            infographic_style,
-            "--infographic-orientation",
-            infographic_orientation,
-            "--slide-deck-format",
-            slide_deck_format,
-            "--slide-deck-output-format",
-            slide_deck_output_format,
-            "--flashcards-format",
-            flashcards_format,
         ]
-        if artifact_instructions:
-            cmd.extend(["--artifact-instructions", artifact_instructions])
-        for artifact in artifacts:
-            cmd.extend(["--artifact", artifact])
-
         timeout_seconds = 240 if should_run_pipeline_inline() else 1800
         result = subprocess.run(
             cmd,
@@ -352,67 +273,273 @@ def execute_notebooklm_pipeline(
             text=True,
             timeout=timeout_seconds,
             encoding="utf-8",
-            env=pipeline_env,
+            env=os.environ.copy(),
         )
         if result.returncode != 0:
-            raise RuntimeError(result.stderr or result.stdout or "Pipeline failed")
+            raise RuntimeError(result.stderr or result.stdout or "NotebookLM analysis failed")
         return json.loads(result.stdout)
     finally:
         try:
             urls_path.unlink(missing_ok=True)
         except OSError:
             pass
-        if temp_home is not None:
-            shutil.rmtree(temp_home, ignore_errors=True)
 
 
-def run_notebooklm_pipeline(job_id: str, **kwargs: Any) -> None:
+def run_notebooklm_job(job_id: str, **kwargs: Any) -> None:
     update_job(
         job_id,
         status="running",
-        stage="Creating notebook and importing sources",
+        stage="NotebookLM is analyzing sources",
         started_at=now_iso(),
     )
     try:
-        payload = execute_notebooklm_pipeline(**kwargs)
+        payload = execute_notebooklm_analysis(**kwargs)
+        answer = (
+            ((payload.get("analysis") or {}).get("answer"))
+            or "NotebookLM returned no answer."
+        )
         update_job(
             job_id,
             status="done",
             stage="Completed",
             finished_at=now_iso(),
-            result=payload,
-            artifacts=list_artifact_links(payload),
+            result={
+                "title": (payload.get("notebook") or {}).get("title") or kwargs.get("title"),
+                "answer": answer,
+                "raw": payload,
+            },
         )
     except Exception as exc:
         update_job(
             job_id,
             status="error",
-            stage="Pipeline failed",
+            stage="NotebookLM failed",
             finished_at=now_iso(),
             error=str(exc),
         )
 
 
+def extract_urls_from_text(raw_text: str) -> list[str]:
+    urls = []
+    seen: set[str] = set()
+    for match in URL_RE.findall(raw_text):
+        cleaned = match.rstrip(".,);]")
+        if cleaned not in seen:
+            seen.add(cleaned)
+            urls.append(cleaned)
+    return urls
+
+
+def build_txt_bytes(content: str) -> bytes:
+    return content.encode("utf-8")
+
+
+def build_pdf_bytes(content: str, title: str) -> bytes:
+    lines = [title, ""] + content.splitlines()
+    normalized = [line[:100] for line in lines[:45]]
+
+    def pdf_escape(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+    y = 760
+    commands = ["BT", "/F1 12 Tf", "50 790 Td"]
+    for index, line in enumerate(normalized):
+        if index == 0:
+            commands.append(f"({pdf_escape(line)}) Tj")
+            y -= 24
+            continue
+        commands.append(f"1 0 0 1 50 {y} Tm ({pdf_escape(line or ' ')}) Tj")
+        y -= 16
+        if y < 60:
+            break
+    commands.append("ET")
+    stream = "\n".join(commands).encode("latin-1", "replace")
+
+    objects: list[bytes] = []
+    objects.append(b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n")
+    objects.append(b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n")
+    objects.append(
+        b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n"
+    )
+    objects.append(b"4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n")
+    objects.append(
+        f"5 0 obj << /Length {len(stream)} >> stream\n".encode("latin-1")
+        + stream
+        + b"\nendstream endobj\n"
+    )
+
+    output = io.BytesIO()
+    output.write(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj in objects:
+        offsets.append(output.tell())
+        output.write(obj)
+    xref_start = output.tell()
+    output.write(f"xref\n0 {len(objects) + 1}\n".encode("latin-1"))
+    output.write(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.write(f"{offset:010d} 00000 n \n".encode("latin-1"))
+    output.write(
+        (
+            f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_start}\n%%EOF"
+        ).encode("latin-1")
+    )
+    return output.getvalue()
+
+
+def build_docx_bytes(content: str, title: str) -> bytes:
+    paragraphs = [title, ""] + content.splitlines()
+    paragraph_xml = "".join(
+        f"<w:p><w:r><w:t xml:space=\"preserve\">{xml_escape(line or ' ')}</w:t></w:r></w:p>"
+        for line in paragraphs
+    )
+    document_xml = (
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+        "<w:document xmlns:wpc=\"http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas\" "
+        "xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" "
+        "xmlns:o=\"urn:schemas-microsoft-com:office:office\" "
+        "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" "
+        "xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\" "
+        "xmlns:v=\"urn:schemas-microsoft-com:vml\" "
+        "xmlns:wp14=\"http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing\" "
+        "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" "
+        "xmlns:w10=\"urn:schemas-microsoft-com:office:word\" "
+        "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" "
+        "xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\" "
+        "xmlns:wpg=\"http://schemas.microsoft.com/office/word/2010/wordprocessingGroup\" "
+        "xmlns:wpi=\"http://schemas.microsoft.com/office/word/2010/wordprocessingInk\" "
+        "xmlns:wne=\"http://schemas.microsoft.com/office/word/2006/wordml\" "
+        "xmlns:wps=\"http://schemas.microsoft.com/office/word/2010/wordprocessingShape\" "
+        "mc:Ignorable=\"w14 wp14\">"
+        f"<w:body>{paragraph_xml}<w:sectPr>"
+        "<w:pgSz w:w=\"12240\" w:h=\"15840\"/>"
+        "<w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" "
+        "w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/>"
+        "</w:sectPr></w:body></w:document>"
+    )
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as docx:
+        docx.writestr(
+            "[Content_Types].xml",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+            "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
+            "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+            "<Override PartName=\"/word/document.xml\" "
+            "ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"
+            "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>"
+            "<Override PartName=\"/docProps/app.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.extended-properties+xml\"/>"
+            "</Types>",
+        )
+        docx.writestr(
+            "_rels/.rels",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/>"
+            "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/>"
+            "<Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties\" Target=\"docProps/app.xml\"/>"
+            "</Relationships>",
+        )
+        docx.writestr(
+            "docProps/core.xml",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+            "<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" "
+            "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
+            "xmlns:dcterms=\"http://purl.org/dc/terms/\" "
+            "xmlns:dcmitype=\"http://purl.org/dc/dcmitype/\" "
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
+            f"<dc:title>{xml_escape(title)}</dc:title>"
+            "<dc:creator>LLMNoteTube</dc:creator>"
+            f"<cp:lastModifiedBy>LLMNoteTube</cp:lastModifiedBy>"
+            f"<dcterms:created xsi:type=\"dcterms:W3CDTF\">{xml_escape(now_iso())}</dcterms:created>"
+            f"<dcterms:modified xsi:type=\"dcterms:W3CDTF\">{xml_escape(now_iso())}</dcterms:modified>"
+            "</cp:coreProperties>",
+        )
+        docx.writestr(
+            "docProps/app.xml",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+            "<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties\" "
+            "xmlns:vt=\"http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes\">"
+            "<Application>LLMNoteTube</Application>"
+            "</Properties>",
+        )
+        docx.writestr(
+            "word/_rels/document.xml.rels",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"></Relationships>",
+        )
+        docx.writestr("word/document.xml", document_xml)
+    return output.getvalue()
+
+
+def build_export_file(content: str, title: str, file_format: str) -> tuple[io.BytesIO, str, str]:
+    safe_title = re.sub(r"[^a-zA-Z0-9_-]+", "-", title.strip()).strip("-") or "llmnotetube-output"
+    if file_format == "txt":
+        return io.BytesIO(build_txt_bytes(content)), "text/plain", f"{safe_title}.txt"
+    if file_format == "pdf":
+        return io.BytesIO(build_pdf_bytes(content, title)), "application/pdf", f"{safe_title}.pdf"
+    if file_format == "docx":
+        return (
+            io.BytesIO(build_docx_bytes(content, title)),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            f"{safe_title}.docx",
+        )
+    raise ValueError("Unsupported format.")
+
+
+def render_login(error: str | None = None) -> str:
+    return render_template(
+        "login.html",
+        title="Login",
+        page_name="login",
+        current_user=get_current_user(),
+        login_error=error,
+        show_demo_credentials=using_demo_credentials(),
+        demo_email=configured_login_email(),
+        demo_password=configured_login_password(),
+        bootstrap={"page": "login"},
+    )
+
+
 @app.route("/")
-@app.route("/overview")
-def overview_page():
-    return render_template("overview.html", **page_context("overview", "Overview"))
+def root_page():
+    if get_current_user():
+        return redirect(url_for("workspace_page"))
+    return redirect(url_for("login_page"))
 
 
-@app.route("/connect")
-def connect_page():
-    return render_template("connect.html", **page_context("connect", "Connect"))
+@app.route("/login", methods=["GET", "POST"])
+def login_page():
+    if request.method == "GET":
+        if get_current_user():
+            return redirect(url_for("workspace_page"))
+        return render_login()
+
+    email = (request.form.get("email") or "").strip()
+    password = request.form.get("password") or ""
+
+    if email == configured_login_email() and password == configured_login_password():
+        session.permanent = True
+        session["user_email"] = email
+        return redirect(url_for("workspace_page"))
+
+    return render_login("Invalid email or password.")
 
 
-@app.route("/workflow")
-def workflow_page():
-    return render_template("workflow.html", **page_context("workflow", "Workflow"))
+@app.route("/logout", methods=["POST"])
+@login_required
+def logout_page():
+    session.clear()
+    return redirect(url_for("login_page"))
 
 
 @app.route("/workspace")
+@login_required
 def workspace_page():
-    context = page_context("workspace", "Workspace")
-    return render_template("workspace.html", **context)
+    return render_template("workspace.html", **page_context("workspace", "Workspace"))
 
 
 @app.route("/healthz")
@@ -420,119 +547,89 @@ def healthcheck():
     return jsonify({"status": "ok", "time": now_iso()})
 
 
-@app.route("/api/system/status")
-def api_system_status():
-    return jsonify(serialize_system_status())
-
-
-@app.route("/api/auth/status")
-def api_auth_status():
-    return jsonify(serialize_site_auth_status())
-
-
-@app.route("/api/notebooklm/validate", methods=["POST"])
-def api_notebooklm_validate():
-    data = request.get_json() or {}
-    auth_json = (data.get("auth_json") or "").strip()
-    if not auth_json:
-        return jsonify({"error": "auth_json is required"}), 400
-
-    try:
-        from notebooklm.auth import extract_cookies_from_storage
-
-        storage_state = json.loads(auth_json)
-        cookies = extract_cookies_from_storage(storage_state)
-    except Exception as exc:
-        return jsonify({"error": f"Invalid NotebookLM auth payload: {exc}"}), 400
-
-    return jsonify(
-        {
-            "valid": True,
-            "cookie_count": len(cookies),
-            "message": "NotebookLM auth JSON looks valid for this browser session.",
-        }
-    )
-
-
 @app.route("/api/yt-research", methods=["POST"])
+@login_required
 def api_yt_research():
     data = request.get_json() or {}
     query = (data.get("query") or "").strip()
     if not query:
         return jsonify({"error": "query is required"}), 400
+
     try:
-        payload = run_yt_research(
-            query=query,
-            count=int(data.get("count", 25)),
-            search_mode=data.get("search_mode", "latest"),
-            sort=data.get("sort", "views"),
-            pool_size=data.get("pool_size"),
-        )
+        payload = run_yt_research(query=query, count=int(data.get("count", 12)))
         return jsonify(payload)
     except subprocess.TimeoutExpired:
-        return jsonify({"error": "YouTube search timed out"}), 504
+        return jsonify({"error": "YouTube search timed out."}), 504
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
 
-@app.route("/api/notebooklm/pipeline", methods=["POST"])
-def api_notebooklm_pipeline():
-    data = request.get_json() or {}
-    title = (data.get("title") or "").strip()
-    urls_data = data.get("urls_data")
-    urls_list = data.get("urls_list")
+@app.route("/api/notebooklm/connect", methods=["POST"])
+@login_required
+def api_notebooklm_connect():
+    if notebooklm_backend_ready():
+        return jsonify({"connected": True, "message": "NotebookLM backend is ready."})
+    return (
+        jsonify(
+            {
+                "connected": False,
+                "error": (
+                    "NotebookLM backend is not connected yet. Run .\\notebooklm.cmd login "
+                    "on the server or local workspace first."
+                ),
+            }
+        ),
+        400,
+    )
 
-    if not title:
-        return jsonify({"error": "title is required"}), 400
 
-    urls_payload = urls_data if urls_data is not None else urls_list
-    if not urls_payload:
-        return jsonify({"error": "urls_data or urls_list is required"}), 400
-
-    provided_auth_json = (data.get("auth_json") or "").strip() or None
-    auth_source = get_notebooklm_auth_source()
-    if provided_auth_json is None and auth_source not in {"env", "storage-file"}:
+@app.route("/api/notebooklm/run", methods=["POST"])
+@login_required
+def api_notebooklm_run():
+    if not notebooklm_backend_ready():
         return (
             jsonify(
                 {
                     "error": (
-                        "NotebookLM is not connected yet. Add a browser session on the Connect page "
-                        "or configure backend auth."
+                        "NotebookLM backend is not connected. Run .\\notebooklm.cmd login "
+                        "before using this feature."
                     )
                 }
             ),
             400,
         )
 
-    pipeline_kwargs = {
+    data = request.get_json() or {}
+    title = (data.get("title") or "").strip() or "LLMNoteTube Research"
+    prompt = (data.get("prompt") or "").strip() or "Summarize the top findings across these sources."
+    sources_text = (data.get("sources_text") or "").strip()
+    urls = extract_urls_from_text(sources_text)
+
+    if not urls:
+        return jsonify({"error": "Paste at least one YouTube URL."}), 400
+
+    kwargs = {
         "title": title,
-        "urls_data": urls_payload,
-        "analysis_prompt": data.get(
-            "analysis_prompt",
-            "Summarize the top findings across these sources.",
-        ),
-        "artifacts": data.get("artifacts", ["infographic"]),
-        "artifact_instructions": data.get("artifact_instructions") or None,
-        "infographic_style": data.get("infographic_style", "auto"),
-        "infographic_orientation": data.get("infographic_orientation", "portrait"),
-        "slide_deck_format": data.get("slide_deck_format", "detailed"),
-        "slide_deck_output_format": data.get("slide_deck_output_format", "pptx"),
-        "flashcards_format": data.get("flashcards_format", "markdown"),
-        "auth_json": provided_auth_json,
+        "urls_data": {"urls": urls},
+        "analysis_prompt": prompt,
     }
 
     if should_run_pipeline_inline():
         try:
-            payload = execute_notebooklm_pipeline(**pipeline_kwargs)
+            payload = execute_notebooklm_analysis(**kwargs)
+            answer = ((payload.get("analysis") or {}).get("answer")) or "NotebookLM returned no answer."
             return jsonify(
                 {
                     "mode": "direct",
-                    "result": payload,
-                    "artifacts": list_artifact_links(payload),
+                    "result": {
+                        "title": (payload.get("notebook") or {}).get("title") or title,
+                        "answer": answer,
+                        "raw": payload,
+                    },
                 }
             )
         except subprocess.TimeoutExpired:
-            return jsonify({"error": "NotebookLM pipeline timed out in direct mode"}), 504
+            return jsonify({"error": "NotebookLM timed out."}), 504
         except Exception as exc:
             return jsonify({"error": str(exc)}), 500
 
@@ -545,56 +642,54 @@ def api_notebooklm_pipeline():
             "stage": "Queued",
             "created_at": now_iso(),
             "updated_at": now_iso(),
-            "started_at": None,
-            "finished_at": None,
-            "request": {
-                "title": title,
-                "artifact_count": len(data.get("artifacts") or []),
-            },
             "result": None,
             "error": None,
-            "artifacts": [],
         },
     )
-
     thread = threading.Thread(
-        target=run_notebooklm_pipeline,
-        kwargs={"job_id": job_id, **pipeline_kwargs},
+        target=run_notebooklm_job,
+        kwargs={"job_id": job_id, **kwargs},
         daemon=True,
     )
     thread.start()
-    return jsonify({"job_id": job_id, "mode": "background"})
-
-
-@app.route("/api/jobs")
-def api_jobs():
-    with jobs_lock:
-        payload = sorted(
-            jobs.values(),
-            key=lambda item: item.get("created_at") or "",
-            reverse=True,
-        )
-    return jsonify({"jobs": payload[:10]})
+    return jsonify({"mode": "background", "job_id": job_id})
 
 
 @app.route("/api/jobs/<job_id>")
+@login_required
 def api_job_status(job_id: str):
     with jobs_lock:
         job = jobs.get(job_id)
     if not job:
-        return jsonify({"error": "Job not found"}), 404
+        return jsonify({"error": "Job not found."}), 404
     return jsonify(job)
 
 
-@app.route("/outputs/notebooklm/<path:subpath>")
-def serve_artifact(subpath: str):
-    safe_path = Path(subpath)
-    if ".." in subpath or safe_path.is_absolute():
-        return jsonify({"error": "Invalid path"}), 400
-    file_path = OUTPUTS_ROOT / subpath
-    if not file_path.is_file():
-        return jsonify({"error": "File not found"}), 404
-    return send_from_directory(file_path.parent, file_path.name, as_attachment=True)
+@app.route("/api/download-analysis", methods=["POST"])
+@login_required
+def api_download_analysis():
+    data = request.get_json() or {}
+    content = (data.get("content") or "").strip()
+    title = (data.get("title") or "").strip() or "LLMNoteTube Output"
+    file_format = (data.get("format") or "").strip().lower()
+
+    if not content:
+        return jsonify({"error": "content is required"}), 400
+    if file_format not in {"txt", "pdf", "docx"}:
+        return jsonify({"error": "format must be txt, pdf, or docx"}), 400
+
+    try:
+        file_handle, mime_type, filename = build_export_file(content, title, file_format)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    file_handle.seek(0)
+    return send_file(
+        file_handle,
+        mimetype=mime_type,
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 if __name__ == "__main__":

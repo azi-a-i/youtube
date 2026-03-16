@@ -2,12 +2,13 @@
 const bootstrapWindow = window;
 const bootstrap = bootstrapWindow.LLMNOTETUBE_BOOTSTRAP ?? {};
 const state = {
-    lastYtPayload: null,
+    lastSearch: null,
+    notebookConnected: false,
     pollTimer: null,
-    pulseTimer: null,
-    pulseValue: 10,
-    selectedVideoUrls: new Set(),
-    system: null,
+    progressTimer: null,
+    progressValue: 18,
+    result: null,
+    selectedUrls: new Set(),
 };
 function byId(id) {
     const element = document.getElementById(id);
@@ -35,18 +36,6 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
-function formatViews(value) {
-    if (value == null) {
-        return "Unknown";
-    }
-    if (value >= 1000000) {
-        return `${(value / 1000000).toFixed(1)}M`;
-    }
-    if (value >= 1000) {
-        return `${(value / 1000).toFixed(1)}K`;
-    }
-    return String(value);
-}
 function formatParagraphs(text) {
     if (!text) {
         return "<p>No NotebookLM answer was returned.</p>";
@@ -65,295 +54,54 @@ async function fetchJson(url, options) {
         payload = JSON.parse(text);
     }
     catch {
-        const snippet = text.slice(0, 140).trim();
-        throw new Error(snippet || "Unexpected non-JSON response from the server.");
+        throw new Error(text.slice(0, 160).trim() || "Unexpected response from the server.");
     }
     if (!response.ok) {
         throw new Error(payload.error || "Request failed.");
     }
     return payload;
 }
-function getSelectedVideos() {
-    const videos = state.lastYtPayload?.videos ?? [];
-    return videos.filter((video) => {
-        const url = video.url ?? "";
-        return state.selectedVideoUrls.has(url);
-    });
+async function fetchBlob(url, options) {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+        const text = await response.text();
+        let payload = null;
+        try {
+            payload = JSON.parse(text);
+        }
+        catch {
+            payload = null;
+        }
+        throw new Error(payload?.error || text || "Download failed.");
+    }
+    return response.blob();
 }
-function updateSelectionRibbon() {
-    const selectionCount = maybeById("selection-count");
-    if (selectionCount) {
-        selectionCount.textContent = `${getSelectedVideos().length} selected`;
-    }
-}
-function renderSystemStatus(payload) {
-    state.system = payload;
-    const siteAuthState = maybeById("site-auth-state");
-    const siteAuthDetail = maybeById("site-auth-detail");
-    const researchState = maybeById("research-state");
-    const researchDetail = maybeById("research-detail");
-    const notebookState = maybeById("notebook-state");
-    const notebookDetail = maybeById("notebook-detail");
-    const workspaceState = maybeById("workspace-state");
-    const workspaceDetail = maybeById("workspace-detail");
-    const workspaceNote = maybeById("workspace-note");
-    if (siteAuthState) {
-        siteAuthState.textContent = payload.site_auth.authenticated ? "Connected" : "Not connected";
-    }
-    if (siteAuthDetail) {
-        if (payload.site_auth.authenticated) {
-            siteAuthDetail.textContent = payload.site_auth.user?.email || "Signed in";
-        }
-        else if (payload.site_auth.google_oauth_configured) {
-            siteAuthDetail.textContent = "Sign in with Google to unlock the workspace.";
-        }
-        else {
-            siteAuthDetail.textContent = "Google login is not configured for this deployment.";
-        }
-    }
-    if (researchState) {
-        if (!payload.site_auth.authenticated) {
-            researchState.textContent = "Locked";
-        }
-        else {
-            researchState.textContent = payload.yt_research_ready ? "Ready" : "Offline";
-        }
-    }
-    if (researchDetail) {
-        researchDetail.textContent = payload.site_auth.authenticated
-            ? payload.yt_research_ready
-                ? "YouTube metadata search is available."
-                : "The Python backend is not ready for search."
-            : "Login is required before users can run topic research.";
-    }
-    if (notebookState) {
-        notebookState.textContent = payload.notebooklm_ready ? "Connected" : "Not ready";
-    }
-    if (notebookDetail) {
-        notebookDetail.textContent = payload.notebooklm_ready
-            ? `Backend auth source: ${payload.auth_source || "connected"}`
-            : payload.deploy_auth_hint || "NotebookLM backend auth is still missing.";
-    }
-    if (workspaceState) {
-        workspaceState.textContent = payload.workspace_ready
-            ? "Operational"
-            : payload.site_auth.authenticated
-                ? "Partially ready"
-                : "Locked";
-    }
-    if (workspaceDetail) {
-        workspaceDetail.textContent = payload.workspace_detail || "Workspace status unavailable.";
-    }
-    if (workspaceNote) {
-        workspaceNote.className = payload.notebooklm_ready ? "message message-info" : "message message-warning";
-        workspaceNote.textContent = payload.notebooklm_ready
-            ? `Google login is active. NotebookLM is connected in ${payload.pipeline_delivery_mode || "background"} mode.`
-            : payload.deploy_auth_hint || "NotebookLM backend auth is not configured yet.";
-    }
-}
-async function loadSystemStatus() {
-    try {
-        const payload = await fetchJson("/api/system/status");
-        renderSystemStatus(payload);
-    }
-    catch (error) {
-        const message = error instanceof Error ? error.message : "Status endpoint failed.";
-        const elements = [
-            maybeById("site-auth-detail"),
-            maybeById("research-detail"),
-            maybeById("notebook-detail"),
-            maybeById("workspace-detail"),
-        ];
-        elements.forEach((element) => {
-            if (element) {
-                element.textContent = message;
-            }
-        });
-    }
-}
-function renderYtResults(payload, resetSelection) {
-    const ytMeta = maybeById("yt-meta");
-    const ytResults = maybeById("yt-results");
-    const videoGrid = maybeById("video-grid");
-    const nlTitle = maybeById("nl-title");
-    if (!ytMeta || !ytResults || !videoGrid) {
+function renderVideoResults(payload) {
+    const resultsShell = maybeById("yt-results");
+    const meta = maybeById("yt-meta");
+    const list = maybeById("video-list");
+    if (!resultsShell || !meta || !list) {
         return;
     }
     const videos = payload.videos ?? [];
-    state.lastYtPayload = payload;
-    if (resetSelection) {
-        state.selectedVideoUrls = new Set(videos
-            .map((video) => video.url ?? "")
-            .filter(Boolean));
-    }
-    ytMeta.textContent = `${payload.returned_count ?? videos.length} videos for "${payload.query ?? "your topic"}"`;
-    videoGrid.innerHTML = videos
+    state.lastSearch = payload;
+    state.selectedUrls = new Set(videos.map((item) => item.url ?? "").filter(Boolean));
+    meta.textContent = `${videos.length} results for "${payload.query ?? ""}"`;
+    list.innerHTML = videos
         .map((video) => {
         const url = video.url ?? "";
-        const checked = state.selectedVideoUrls.has(url) ? "checked" : "";
         return `
-        <article class="video-card" data-url="${escapeHtml(url)}">
-          <label class="video-check">
-            <input type="checkbox" class="video-toggle" data-url="${escapeHtml(url)}" ${checked} />
-            <span>Use in pipeline</span>
-          </label>
-          <div class="video-card-body">
-            <p class="video-rank">#${video.rank ?? "?"}</p>
-            <h4>${escapeHtml(video.title || "Untitled video")}</h4>
-            <p class="video-channel">${escapeHtml(video.channel || video.author || "Unknown channel")}</p>
+        <label class="video-row">
+          <input type="checkbox" class="video-toggle" data-url="${escapeHtml(url)}" checked />
+          <div class="video-copy">
+            <strong>${escapeHtml(video.title || "Untitled video")}</strong>
+            <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
           </div>
-          <div class="video-metrics">
-            <span>${formatViews(video.views)} views</span>
-            <span>${escapeHtml(video.duration || "Unknown duration")}</span>
-            <span>${escapeHtml(video.upload_date || "Unknown date")}</span>
-          </div>
-          <a class="video-link" href="${escapeHtml(url || "#")}" target="_blank" rel="noopener">Open video</a>
-        </article>
+        </label>
       `;
     })
         .join("");
-    updateSelectionRibbon();
-    ytResults.hidden = false;
-    if (nlTitle && !nlTitle.value.trim() && payload.query) {
-        nlTitle.value = `LLMNoteTube Research: ${payload.query}`;
-    }
-}
-function parseNotebookPayload(rawValue) {
-    const trimmed = rawValue.trim();
-    if (!trimmed) {
-        throw new Error("Paste URLs or yt-research JSON first.");
-    }
-    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-        const parsed = JSON.parse(trimmed);
-        if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
-            return { urls: parsed };
-        }
-        return parsed;
-    }
-    const urls = trimmed
-        .split(/\n/)
-        .map((item) => item.trim())
-        .filter(Boolean);
-    return { urls };
-}
-function fillNotebookTextareaFromSelection() {
-    const nlStatus = maybeById("nl-status");
-    const nlUrls = maybeById("nl-urls");
-    if (!nlUrls) {
-        return;
-    }
-    const selectedVideos = getSelectedVideos();
-    if (!selectedVideos.length) {
-        if (nlStatus) {
-            setMessage(nlStatus, "Select at least one video first.", "warning");
-        }
-        return;
-    }
-    const payload = {
-        query: state.lastYtPayload?.query,
-        returned_count: selectedVideos.length,
-        search_mode: state.lastYtPayload?.search_mode,
-        sort: state.lastYtPayload?.sort,
-        videos: selectedVideos,
-    };
-    nlUrls.value = JSON.stringify(payload, null, 2);
-    maybeById("pipeline-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-function renderSummaryCards(result) {
-    const resultSummary = maybeById("result-summary");
-    if (!resultSummary) {
-        return;
-    }
-    const notebook = result.notebook ?? {};
-    const readySources = result.sources?.ready_sources ?? [];
-    const artifactCount = result.artifacts?.length ?? 0;
-    resultSummary.innerHTML = `
-    <div class="summary-card">
-      <span class="status-label">Notebook</span>
-      <strong>${escapeHtml(notebook.title || "Untitled notebook")}</strong>
-      <span>${escapeHtml(notebook.id || "No ID")}</span>
-    </div>
-    <div class="summary-card">
-      <span class="status-label">Ready sources</span>
-      <strong>${readySources.length}</strong>
-      <span>Imported into NotebookLM</span>
-    </div>
-    <div class="summary-card">
-      <span class="status-label">Artifacts</span>
-      <strong>${artifactCount}</strong>
-      <span>Generated files</span>
-    </div>
-  `;
-}
-function renderArtifacts(job) {
-    const artifactDownloads = maybeById("nl-artifacts");
-    if (!artifactDownloads) {
-        return;
-    }
-    const items = job.artifacts ?? [];
-    artifactDownloads.innerHTML = "";
-    if (!items.length) {
-        artifactDownloads.innerHTML = "<p class='message message-warning'>No downloadable artifacts were returned.</p>";
-        return;
-    }
-    items.forEach((item) => {
-        const link = document.createElement("a");
-        link.className = "download-card";
-        link.href = item.url || "#";
-        link.target = "_blank";
-        link.rel = "noopener";
-        if (item.url) {
-            link.setAttribute("download", "");
-        }
-        else {
-            link.classList.add("is-disabled");
-        }
-        link.innerHTML = `
-      <span class="status-label">${escapeHtml(item.kind || "artifact")}</span>
-      <strong>${escapeHtml(item.name || "Download")}</strong>
-    `;
-        artifactDownloads.appendChild(link);
-    });
-}
-function showNotebookResult(job) {
-    const resultPanel = maybeById("result-panel");
-    const analysisAnswer = maybeById("analysis-answer");
-    const citationCount = maybeById("citation-count");
-    const rawJson = maybeById("raw-json");
-    if (!resultPanel || !analysisAnswer || !citationCount || !rawJson) {
-        return;
-    }
-    const result = job.result ?? {};
-    const analysis = result.analysis ?? {};
-    renderSummaryCards(result);
-    citationCount.textContent = `${analysis.references?.length ?? 0} references`;
-    analysisAnswer.innerHTML = formatParagraphs(analysis.answer);
-    renderArtifacts(job);
-    rawJson.textContent = JSON.stringify(result, null, 2);
-    resultPanel.hidden = false;
-    resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-function stopProgressAnimation() {
-    if (state.pulseTimer != null) {
-        window.clearInterval(state.pulseTimer);
-        state.pulseTimer = null;
-    }
-}
-function startProgressAnimation() {
-    const jobProgressBar = maybeById("job-progress-bar");
-    if (!jobProgressBar) {
-        return;
-    }
-    stopProgressAnimation();
-    state.pulseValue = 18;
-    jobProgressBar.style.width = `${state.pulseValue}%`;
-    state.pulseTimer = window.setInterval(() => {
-        state.pulseValue = Math.min(88, state.pulseValue + 6);
-        jobProgressBar.style.width = `${state.pulseValue}%`;
-        if (state.pulseValue >= 88) {
-            state.pulseValue = 46;
-        }
-    }, 1000);
+    resultsShell.hidden = false;
 }
 function stopPolling() {
     if (state.pollTimer != null) {
@@ -361,109 +109,136 @@ function stopPolling() {
         state.pollTimer = null;
     }
 }
-function pollJob(jobId, submitButton) {
-    const nlStatus = maybeById("nl-status");
-    const nlProgress = maybeById("nl-job-progress");
-    const jobStage = maybeById("job-stage");
-    const jobHelper = maybeById("job-helper");
-    const jobProgressBar = maybeById("job-progress-bar");
-    if (!nlStatus || !nlProgress || !jobStage || !jobHelper || !jobProgressBar) {
+function stopProgress() {
+    if (state.progressTimer != null) {
+        window.clearInterval(state.progressTimer);
+        state.progressTimer = null;
+    }
+}
+function startProgress() {
+    const bar = maybeById("job-progress-bar");
+    if (!bar) {
         return;
     }
+    stopProgress();
+    state.progressValue = 18;
+    bar.style.width = `${state.progressValue}%`;
+    state.progressTimer = window.setInterval(() => {
+        state.progressValue = Math.min(90, state.progressValue + 7);
+        bar.style.width = `${state.progressValue}%`;
+        if (state.progressValue >= 90) {
+            state.progressValue = 48;
+        }
+    }, 900);
+}
+function renderNotebookResult(result) {
+    const panel = maybeById("result-panel");
+    const title = maybeById("result-title");
+    const answer = maybeById("analysis-answer");
+    const rawJson = maybeById("raw-json");
+    if (!panel || !title || !answer || !rawJson) {
+        return;
+    }
+    state.result = result;
+    title.textContent = result.title || "Generated response";
+    answer.innerHTML = formatParagraphs(result.answer);
+    rawJson.textContent = JSON.stringify(result.raw ?? {}, null, 2);
+    panel.hidden = false;
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function pollJob(jobId, submitButton) {
+    const status = byId("nl-status");
+    const progress = byId("nl-job-progress");
+    const stage = byId("job-stage");
+    const helper = byId("job-helper");
+    const bar = byId("job-progress-bar");
     stopPolling();
-    startProgressAnimation();
+    startProgress();
     state.pollTimer = window.setInterval(async () => {
         try {
             const payload = await fetchJson(`/api/jobs/${jobId}`);
-            jobStage.textContent = payload.stage || "Working";
-            jobHelper.textContent =
-                payload.status === "running"
-                    ? "NotebookLM can take a few minutes for analysis and artifact generation."
-                    : "Job state updated.";
+            stage.textContent = payload.stage || "Working";
+            helper.textContent = "NotebookLM is processing the selected sources.";
             if (payload.status === "done") {
                 stopPolling();
-                stopProgressAnimation();
-                jobProgressBar.style.width = "100%";
+                stopProgress();
+                bar.style.width = "100%";
+                progress.hidden = true;
                 submitButton.disabled = false;
-                nlProgress.hidden = true;
-                setMessage(nlStatus, "NotebookLM pipeline finished successfully.", "success");
-                showNotebookResult(payload);
+                setMessage(status, "NotebookLM finished successfully.", "success");
+                renderNotebookResult(payload.result ?? {});
             }
             else if (payload.status === "error") {
                 stopPolling();
-                stopProgressAnimation();
+                stopProgress();
+                progress.hidden = true;
                 submitButton.disabled = false;
-                nlProgress.hidden = true;
-                setMessage(nlStatus, payload.error || "Pipeline failed.", "error");
+                setMessage(status, payload.error || "NotebookLM failed.", "error");
             }
         }
         catch (error) {
             stopPolling();
-            stopProgressAnimation();
+            stopProgress();
+            progress.hidden = true;
             submitButton.disabled = false;
-            nlProgress.hidden = true;
-            const message = error instanceof Error ? error.message : "Polling failed.";
-            setMessage(nlStatus, message, "error");
+            setMessage(status, error instanceof Error ? error.message : "Polling failed.", "error");
         }
     }, 2500);
 }
-function attachWorkspaceHandlers() {
-    const ytForm = maybeById("yt-form");
-    const nlForm = maybeById("nl-form");
-    if (!ytForm || !nlForm) {
+function addSelectedUrlsToSources() {
+    const sources = maybeById("nl-sources");
+    if (!sources) {
         return;
     }
+    const urls = Array.from(state.selectedUrls);
+    if (!urls.length) {
+        return;
+    }
+    const existing = sources.value.trim();
+    const existingLines = existing ? existing.split(/\n/).map((item) => item.trim()) : [];
+    const merged = Array.from(new Set([...existingLines.filter(Boolean), ...urls]));
+    sources.value = `${merged.join("\n")}\n`;
+}
+function attachWorkspaceHandlers() {
+    if (bootstrap.page !== "workspace") {
+        return;
+    }
+    const ytForm = byId("yt-form");
+    const nlForm = byId("nl-form");
     const ytStatus = byId("yt-status");
-    const ytWarning = byId("yt-warning");
-    const ytResults = byId("yt-results");
-    const videoGrid = byId("video-grid");
     const nlStatus = byId("nl-status");
-    const nlUrls = byId("nl-urls");
-    const nlTitle = byId("nl-title");
-    const nlAnalysis = byId("nl-analysis");
-    const nlProgress = byId("nl-job-progress");
-    const jobStage = byId("job-stage");
-    const jobHelper = byId("job-helper");
+    const connectStatus = byId("notebooklm-connect-status");
+    const progress = byId("nl-job-progress");
+    const stage = byId("job-stage");
+    const helper = byId("job-helper");
     const resultPanel = byId("result-panel");
-    maybeById("clear-results")?.addEventListener("click", () => {
-        state.lastYtPayload = null;
-        state.selectedVideoUrls.clear();
-        ytResults.hidden = true;
-        videoGrid.innerHTML = "";
-        updateSelectionRibbon();
-        clearMessage(ytStatus);
-        clearMessage(ytWarning);
-    });
-    maybeById("select-all-videos")?.addEventListener("click", () => {
-        (state.lastYtPayload?.videos ?? []).forEach((video) => {
-            if (video.url) {
-                state.selectedVideoUrls.add(video.url);
-            }
-        });
-        renderYtResults(state.lastYtPayload ?? { videos: [] }, false);
-    });
-    maybeById("clear-selection")?.addEventListener("click", () => {
-        state.selectedVideoUrls.clear();
-        renderYtResults(state.lastYtPayload ?? { videos: [] }, false);
-    });
-    maybeById("copy-selected-urls")?.addEventListener("click", async () => {
-        const urls = getSelectedVideos()
-            .map((video) => video.url ?? "")
-            .filter(Boolean);
-        if (!urls.length) {
-            setMessage(ytStatus, "No selected URLs to copy yet.", "warning");
-            return;
-        }
+    const videoList = byId("video-list");
+    maybeById("connect-notebooklm")?.addEventListener("click", async () => {
+        connectStatus.textContent = "Connecting...";
+        connectStatus.className = "message-inline";
         try {
-            await navigator.clipboard.writeText(urls.join("\n"));
-            setMessage(ytStatus, "Selected URLs copied to your clipboard.", "success");
+            const payload = await fetchJson("/api/notebooklm/connect", {
+                method: "POST",
+            });
+            state.notebookConnected = payload.connected;
+            connectStatus.textContent = payload.message || "NotebookLM backend is ready.";
+            connectStatus.className = "message-inline is-success";
         }
-        catch {
-            setMessage(ytStatus, "Clipboard access failed. Copy from the NotebookLM field instead.", "warning");
+        catch (error) {
+            state.notebookConnected = false;
+            connectStatus.textContent = error instanceof Error ? error.message : "Unable to connect NotebookLM.";
+            connectStatus.className = "message-inline is-error";
         }
     });
-    maybeById("use-in-notebooklm")?.addEventListener("click", fillNotebookTextareaFromSelection);
-    videoGrid.addEventListener("change", (event) => {
+    maybeById("clear-results")?.addEventListener("click", () => {
+        state.lastSearch = null;
+        state.selectedUrls.clear();
+        byId("yt-results").hidden = true;
+        videoList.innerHTML = "";
+        clearMessage(ytStatus);
+    });
+    maybeById("add-selected-sources")?.addEventListener("click", addSelectedUrlsToSources);
+    videoList.addEventListener("change", (event) => {
         const target = event.target;
         if (!(target instanceof HTMLInputElement) || !target.classList.contains("video-toggle")) {
             return;
@@ -473,61 +248,32 @@ function attachWorkspaceHandlers() {
             return;
         }
         if (target.checked) {
-            state.selectedVideoUrls.add(url);
+            state.selectedUrls.add(url);
         }
         else {
-            state.selectedVideoUrls.delete(url);
+            state.selectedUrls.delete(url);
         }
-        updateSelectionRibbon();
-    });
-    document.querySelectorAll(".chip-button").forEach((button) => {
-        button.addEventListener("click", () => {
-            const prompt = button.getAttribute("data-prompt");
-            if (prompt) {
-                nlAnalysis.value = prompt;
-            }
-        });
-    });
-    maybeById("clear-pipeline")?.addEventListener("click", () => {
-        nlForm.reset();
-        clearMessage(nlStatus);
-        nlProgress.hidden = true;
-        resultPanel.hidden = true;
-        stopPolling();
-        stopProgressAnimation();
     });
     ytForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const submitButton = byId("yt-submit");
-        if (!state.system?.site_auth.authenticated) {
-            setMessage(ytStatus, "Login with Google before running research.", "warning");
-            return;
-        }
         submitButton.disabled = true;
         clearMessage(ytStatus);
-        clearMessage(ytWarning);
-        setMessage(ytStatus, "Searching YouTube and ranking results...", "info");
-        const body = {
-            count: Number.parseInt(byId("count").value, 10) || 25,
-            query: byId("query").value.trim(),
-            search_mode: byId("search_mode").value,
-            sort: byId("sort").value,
-        };
+        setMessage(ytStatus, "Searching YouTube...", "info");
         try {
             const payload = await fetchJson("/api/yt-research", {
-                body: JSON.stringify(body),
+                body: JSON.stringify({
+                    count: Number.parseInt(byId("count").value, 10) || 12,
+                    query: byId("query").value.trim(),
+                }),
                 headers: { "Content-Type": "application/json" },
                 method: "POST",
             });
-            renderYtResults(payload, true);
-            setMessage(ytStatus, `Loaded ${payload.returned_count ?? 0} videos.`, "success");
-            if (payload.warnings?.length) {
-                setMessage(ytWarning, payload.warnings.join(" | "), "warning");
-            }
+            renderVideoResults(payload);
+            setMessage(ytStatus, `Loaded ${payload.videos?.length ?? 0} YouTube results.`, "success");
         }
         catch (error) {
-            const message = error instanceof Error ? error.message : "Search failed.";
-            setMessage(ytStatus, message, "error");
+            setMessage(ytStatus, error instanceof Error ? error.message : "Search failed.", "error");
         }
         finally {
             submitButton.disabled = false;
@@ -536,72 +282,79 @@ function attachWorkspaceHandlers() {
     nlForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const submitButton = byId("nl-submit");
+        const title = byId("nl-title").value.trim();
+        const sourcesText = byId("nl-sources").value.trim();
+        const prompt = byId("nl-prompt").value.trim();
+        if (!state.notebookConnected) {
+            setMessage(nlStatus, "Click Connect NotebookLM before running the workspace.", "warning");
+            return;
+        }
+        if (!sourcesText) {
+            setMessage(nlStatus, "Paste at least one YouTube URL.", "warning");
+            return;
+        }
         clearMessage(nlStatus);
         resultPanel.hidden = true;
-        if (!state.system?.site_auth.authenticated) {
-            setMessage(nlStatus, "Login with Google before using the workspace.", "warning");
-            return;
-        }
-        if (!state.system?.notebooklm_ready) {
-            setMessage(nlStatus, state.system?.deploy_auth_hint || "NotebookLM backend is not ready yet.", "warning");
-            return;
-        }
-        const artifacts = Array.from(document.querySelectorAll('input[name="artifact"]:checked')).map((input) => input.value);
-        if (!artifacts.length) {
-            setMessage(nlStatus, "Choose at least one artifact to generate.", "warning");
-            return;
-        }
-        let urlsPayload;
-        try {
-            urlsPayload = parseNotebookPayload(nlUrls.value);
-        }
-        catch (error) {
-            const message = error instanceof Error ? error.message : "Invalid URLs payload.";
-            setMessage(nlStatus, message, "error");
-            return;
-        }
+        progress.hidden = false;
+        stage.textContent = "Queued";
+        helper.textContent = "Submitting the request to NotebookLM.";
         submitButton.disabled = true;
-        nlProgress.hidden = false;
-        jobStage.textContent = "Queued";
-        jobHelper.textContent = "Submitting the request to the backend.";
-        setMessage(nlStatus, "Starting NotebookLM pipeline...", "info");
-        const body = {
-            analysis_prompt: nlAnalysis.value.trim() || undefined,
-            artifact_instructions: byId("nl-artifact-instructions").value.trim() || undefined,
-            artifacts,
-            flashcards_format: byId("nl-flashcards-format").value,
-            infographic_orientation: "portrait",
-            infographic_style: byId("nl-infographic-style").value,
-            slide_deck_format: "detailed",
-            slide_deck_output_format: byId("nl-slide-format").value,
-            title: nlTitle.value.trim(),
-            urls_data: urlsPayload,
-        };
+        setMessage(nlStatus, "Running NotebookLM...", "info");
         try {
-            const payload = await fetchJson("/api/notebooklm/pipeline", {
-                body: JSON.stringify(body),
+            const payload = await fetchJson("/api/notebooklm/run", {
+                body: JSON.stringify({
+                    prompt,
+                    sources_text: sourcesText,
+                    title,
+                }),
                 headers: { "Content-Type": "application/json" },
                 method: "POST",
             });
             if (payload.mode === "direct") {
+                progress.hidden = true;
                 submitButton.disabled = false;
-                nlProgress.hidden = true;
-                setMessage(nlStatus, "NotebookLM pipeline finished successfully.", "success");
-                showNotebookResult({
-                    artifacts: payload.artifacts,
-                    result: payload.result,
-                });
+                setMessage(nlStatus, "NotebookLM finished successfully.", "success");
+                renderNotebookResult(payload.result);
                 return;
             }
             pollJob(payload.job_id, submitButton);
         }
         catch (error) {
+            progress.hidden = true;
             submitButton.disabled = false;
-            nlProgress.hidden = true;
-            const message = error instanceof Error ? error.message : "Unable to start the pipeline.";
-            setMessage(nlStatus, message, "error");
+            setMessage(nlStatus, error instanceof Error ? error.message : "NotebookLM failed.", "error");
+        }
+    });
+    maybeById("download-output")?.addEventListener("click", async () => {
+        if (!state.result?.answer) {
+            return;
+        }
+        const format = byId("download-format").value;
+        const safeTitle = (state.result.title || "llmnotetube-output")
+            .replace(/[^a-zA-Z0-9_-]+/g, "-")
+            .replace(/^-+|-+$/g, "") || "llmnotetube-output";
+        try {
+            const blob = await fetchBlob("/api/download-analysis", {
+                body: JSON.stringify({
+                    content: state.result.answer,
+                    format,
+                    title: state.result.title || "LLMNoteTube Output",
+                }),
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `${safeTitle}.${format}`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+        }
+        catch (error) {
+            setMessage(nlStatus, error instanceof Error ? error.message : "Download failed.", "error");
         }
     });
 }
-void loadSystemStatus();
 attachWorkspaceHandlers();

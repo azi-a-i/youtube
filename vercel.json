@@ -6,15 +6,11 @@
       "destination": "/api/index"
     },
     {
-      "source": "/overview",
+      "source": "/login",
       "destination": "/api/index"
     },
     {
-      "source": "/workflow",
-      "destination": "/api/index"
-    },
-    {
-      "source": "/connect",
+      "source": "/logout",
       "destination": "/api/index"
     },
     {
