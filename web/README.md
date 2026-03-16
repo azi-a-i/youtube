@@ -1,13 +1,12 @@
-# YouTube Research & NotebookLM — Web UI
+# YouTube Research & NotebookLM - Web UI
 
-Interactive website to run **YouTube Research** (yt-dlp search) and the **NotebookLM pipeline** from the browser.
+Interactive browser workspace for the local **YouTube Research** and **NotebookLM** pipeline.
 
 ## Prerequisites
 
-- Python 3.10+ with the project virtual environment (`.venv`) at the repo root, including:
-  - `yt-dlp` and dependencies for the yt-research skill
-  - `notebooklm-py` and dependencies for the NotebookLM skill
-- For NotebookLM: run `.\notebooklm.cmd login` once from the repo root before using the pipeline.
+- Python 3.10+ with the project virtual environment (`.venv`) at the repo root
+- The research and NotebookLM scripts already set up in this repository
+- For NotebookLM: run `.\notebooklm.cmd login` once from the repo root before using the pipeline
 
 ## Install web dependencies
 
@@ -17,25 +16,29 @@ From the repo root:
 .\.venv\Scripts\pip install -r web\requirements.txt
 ```
 
-Or from the `web` folder:
-
-```powershell
-pip install -r requirements.txt
-```
-
 ## Run the app
 
-From the **repo root** (so scripts and `.venv` are found):
+From the repo root:
 
 ```powershell
-.\.venv\Scripts\python.exe web\app.py
+.\run-web.cmd
 ```
 
-Then open: **http://localhost:5000**
+Then open: `http://localhost:5000`
+
+## What changed
+
+- System readiness card for Python and NotebookLM auth
+- Curated YouTube result cards with per-video selection
+- One-click handoff of selected results into NotebookLM
+- Prompt presets and artifact bundle controls
+- Richer pipeline output with analysis text, downloads, and raw JSON
 
 ## Usage
 
-1. **YouTube Research** — Enter a topic, set count/search mode/sort, then click *Search YouTube*. Results appear in a table. Use *Use these in NotebookLM →* to fill the NotebookLM URLs from the search.
-2. **NotebookLM Pipeline** — Enter a notebook title and either paste the yt-research JSON or one URL per line. Choose analysis prompt and artifact types (infographic, slide deck, flashcards), then *Run NotebookLM pipeline*. Wait for the job to finish; download links for generated files appear when done.
+1. Run `.\notebooklm.cmd login` once in a separate terminal.
+2. Start the web app with `.\run-web.cmd`.
+3. Search YouTube by topic, select the videos you want, then send them into NotebookLM.
+4. Run the NotebookLM pipeline and download the generated infographic, slide deck, or flashcards from the result panel.
 
-Generated artifacts are saved under `outputs/notebooklm/<notebook-slug>/` and can be downloaded from the UI.
+Generated artifacts are saved under `outputs/notebooklm/<notebook-slug>/` and can also be downloaded from the UI.
