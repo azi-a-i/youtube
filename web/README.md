@@ -8,11 +8,26 @@ From the repo root:
 
 ```powershell
 .\.venv\Scripts\pip install -r requirements.txt
+cmd /c npm install
 .\notebooklm.cmd login
 .\run-web.cmd
 ```
 
 Then open `http://localhost:5000`.
+
+## Frontend source
+
+The landing page and studio interactions now live in TypeScript:
+
+- source: `web/frontend/app.ts`
+- compiled browser bundle: `web/static/app.js`
+
+Useful commands from the repo root:
+
+```powershell
+cmd /c npm run check:web
+cmd /c npm run build:web
+```
 
 ## Hosted deployment
 

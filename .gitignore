@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .python-runtime/
 .playwright-browsers/
+node_modules/
 .tmp/
 outputs/
 .notebooklm/
