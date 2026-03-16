@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title }} | LLMNoteTube</title>
+  <meta
+    name="description"
+    content="LLMNoteTube helps teams research topics through YouTube discovery and NotebookLM synthesis."
+  />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body data-page="{{ page_name }}">
+  <div class="page-glow glow-a"></div>
+  <div class="page-glow glow-b"></div>
+  <div class="page-grid"></div>
+
+  <header class="site-header">
+    <a class="brand-mark" href="{{ url_for('overview_page') }}">
+      <span class="brand-mark-dot"></span>
+      <span>LLMNoteTube</span>
+    </a>
+
+    <nav class="site-nav">
+      <a href="{{ url_for('overview_page') }}" class="{% if page_name == 'overview' %}is-active{% endif %}">Overview</a>
+      <a href="{{ url_for('workflow_page') }}" class="{% if page_name == 'workflow' %}is-active{% endif %}">Workflow</a>
+      <a href="{{ url_for('workspace_page') }}" class="{% if page_name == 'workspace' %}is-active{% endif %}">Workspace</a>
+    </nav>
+
+    <div class="site-actions">
+      {% if current_user %}
+        <div class="user-chip">
+          {% if current_user.picture %}
+            <img src="{{ current_user.picture }}" alt="{{ current_user.name }}" class="user-avatar" />
+          {% endif %}
+          <div>
+            <strong>{{ current_user.name }}</strong>
+            <span>{{ current_user.email }}</span>
+          </div>
+        </div>
+        <a href="{{ url_for('auth_logout') }}" class="button button-ghost button-small">Log out</a>
+      {% elif google_oauth_configured %}
+        <a href="{{ url_for('auth_login', next=request.path) }}" class="button button-primary button-small">
+          Login with Google
+        </a>
+      {% else %}
+        <span class="status-pill status-pill-warning">Google login not configured</span>
+      {% endif %}
+    </div>
+  </header>
+
+  <section class="status-ribbon">
+    <article class="status-panel">
+      <p class="status-label">Google account</p>
+      <strong id="site-auth-state">{% if current_user %}Connected{% else %}Not connected{% endif %}</strong>
+      <span id="site-auth-detail">
+        {% if current_user %}
+          {{ current_user.email }}
+        {% else %}
+          Sign in to unlock the workspace.
+        {% endif %}
+      </span>
+    </article>
+
+    <article class="status-panel">
+      <p class="status-label">Research engine</p>
+      <strong id="research-state">Checking runtime</strong>
+      <span id="research-detail">YouTube metadata search depends on the Python backend.</span>
+    </article>
+
+    <article class="status-panel">
+      <p class="status-label">NotebookLM backend</p>
+      <strong id="notebook-state">Checking connection</strong>
+      <span id="notebook-detail">Waiting for backend readiness.</span>
+    </article>
+
+    <article class="status-panel">
+      <p class="status-label">Workspace</p>
+      <strong id="workspace-state">Checking access</strong>
+      <span id="workspace-detail">Status will update after the page loads.</span>
+    </article>
+  </section>
+
+  <main class="page-shell">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <p>LLMNoteTube blends topic research, source curation, and NotebookLM synthesis into one guided workspace.</p>
+  </footer>
+
+  <script>
+    window.LLMNOTETUBE_BOOTSTRAP = {{ bootstrap | tojson }};
+  </script>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -13,8 +13,11 @@ TARGET = ROOT / "public"
 
 def main() -> int:
     TARGET.mkdir(parents=True, exist_ok=True)
-    for name in ("index.html", "styles.css", "app.js"):
+    for name in ("styles.css", "app.js"):
         shutil.copy2(SOURCE / name, TARGET / name)
+    stale_index = TARGET / "index.html"
+    if stale_index.exists():
+        stale_index.unlink()
     return 0
 
 

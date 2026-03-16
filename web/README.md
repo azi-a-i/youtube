@@ -1,6 +1,12 @@
-# YouTube Research & NotebookLM - Web UI
+# LLMNoteTube Web App
 
-Interactive browser workspace for the **YouTube Research** and **NotebookLM** pipeline, with both local and hosted deployment support.
+Interactive browser product for YouTube topic research and NotebookLM synthesis, with a three-page flow:
+
+- `Overview`
+- `Workflow`
+- `Workspace`
+
+The workspace is now gated by Google sign-in.
 
 ## Local development
 
@@ -9,6 +15,9 @@ From the repo root:
 ```powershell
 .\.venv\Scripts\pip install -r requirements.txt
 cmd /c npm install
+set GOOGLE_CLIENT_ID=your-google-client-id
+set GOOGLE_CLIENT_SECRET=your-google-client-secret
+set APP_SECRET_KEY=your-session-secret
 .\notebooklm.cmd login
 .\run-web.cmd
 ```
@@ -17,8 +26,9 @@ Then open `http://localhost:5000`.
 
 ## Frontend source
 
-The landing page and studio interactions now live in TypeScript:
+The product UI now lives in Flask templates plus a TypeScript client:
 
+- templates: `web/templates/`
 - source: `web/frontend/app.ts`
 - compiled browser bundle: `web/static/app.js`
 
@@ -31,7 +41,7 @@ cmd /c npm run build:web
 
 ## Hosted deployment
 
-This app is designed for a persistent Python host such as Render, Railway, Fly.io, or a VPS. It is not a good fit for static or serverless-only platforms because the pipeline:
+This app is designed for a persistent Python host such as Render, Railway, Fly.io, or a VPS. It can render on Vercel, but the full NotebookLM pipeline is still better on a persistent host because the workflow:
 
 - launches Python subprocesses for `yt-dlp` and `notebooklm-py`
 - writes generated artifacts to disk
@@ -50,6 +60,9 @@ This app is designed for a persistent Python host such as Render, Railway, Fly.i
 ### Environment variables
 
 - `PORT`: port provided by your host
+- `APP_SECRET_KEY`: Flask session signing key
+- `GOOGLE_CLIENT_ID`: Google OAuth client ID for site login
+- `GOOGLE_CLIENT_SECRET`: Google OAuth client secret for site login
 - `OUTPUTS_ROOT`: where generated NotebookLM files should be stored
 - `NOTEBOOKLM_HOME`: where file-based NotebookLM state should live
 - `NOTEBOOKLM_AUTH_JSON`: preferred for cloud deployment; set this to the full contents of your local `storage_state.json`
@@ -65,18 +78,13 @@ The included `render.yaml` already points `OUTPUTS_ROOT` and `NOTEBOOKLM_HOME` a
 
 ### Vercel note
 
-Vercel can now build and serve the landing page for this repo, but the full NotebookLM pipeline still has serverless limitations around long-running jobs, subprocesses, and durable artifact storage. The Vercel-specific files are:
-
-- `app.py`
-- `pyproject.toml`
-- `vercel.json`
-- `scripts/sync_public.py`
+Vercel can now build and serve the multi-page product shell and Google-gated workspace. The live NotebookLM pipeline is still limited by serverless constraints such as long-running subprocesses and non-persistent in-memory jobs, so Render or another persistent Python host remains the better production target for full use.
 
 ## Usage
 
-1. Search YouTube by topic in the UI.
-2. Select the videos you want to send into NotebookLM.
-3. Run the NotebookLM pipeline for analysis and artifacts.
-4. Download infographic, slide deck, or flashcards from the results panel.
+1. Open `Overview` for the product intro.
+2. Use `Workflow` to understand the research path.
+3. Sign in with Google to unlock `Workspace`.
+4. Search YouTube by topic, select the videos you want, then send them into NotebookLM when the backend status is ready.
 
 Generated artifacts are saved under `outputs/notebooklm/<notebook-slug>/` locally, or under your configured `OUTPUTS_ROOT` in production.

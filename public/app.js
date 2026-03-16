@@ -1,11 +1,13 @@
 "use strict";
+const bootstrapWindow = window;
+const bootstrap = bootstrapWindow.LLMNOTETUBE_BOOTSTRAP ?? {};
 const state = {
-    system: null,
     lastYtPayload: null,
+    pollTimer: null,
     pulseTimer: null,
     pulseValue: 10,
-    pollTimer: null,
     selectedVideoUrls: new Set(),
+    system: null,
 };
 function byId(id) {
     const element = document.getElementById(id);
@@ -14,38 +16,10 @@ function byId(id) {
     }
     return element;
 }
-const ytForm = byId("yt-form");
-const ytStatus = byId("yt-status");
-const ytWarning = byId("yt-warning");
-const ytResults = byId("yt-results");
-const ytMeta = byId("yt-meta");
-const videoGrid = byId("video-grid");
-const selectionCount = byId("selection-count");
-const nlForm = byId("nl-form");
-const nlStatus = byId("nl-status");
-const nlUrls = byId("nl-urls");
-const nlTitle = byId("nl-title");
-const nlAnalysis = byId("nl-analysis");
-const nlProgress = byId("nl-job-progress");
-const jobStage = byId("job-stage");
-const jobHelper = byId("job-helper");
-const jobProgressBar = byId("job-progress-bar");
-const resultPanel = byId("result-panel");
-const resultSummary = byId("result-summary");
-const analysisAnswer = byId("analysis-answer");
-const citationCount = byId("citation-count");
-const artifactDownloads = byId("nl-artifacts");
-const rawJson = byId("raw-json");
-const systemModePill = byId("system-mode-pill");
-const systemDot = byId("system-dot");
-const authState = byId("auth-state");
-const authSource = byId("auth-source");
-const pythonState = byId("python-state");
-const pythonPath = byId("python-path");
-const serverMode = byId("server-mode");
-const outputRoot = byId("output-root");
-const loginCommand = byId("login-command");
-const deployHint = byId("deploy-hint");
+function maybeById(id) {
+    const element = document.getElementById(id);
+    return element instanceof HTMLElement ? element : null;
+}
 function setMessage(element, message, type) {
     element.textContent = message;
     element.className = `message message-${type}`;
@@ -83,6 +57,22 @@ function formatParagraphs(text) {
         .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
         .join("");
 }
+async function fetchJson(url, options) {
+    const response = await fetch(url, options);
+    const text = await response.text();
+    let payload = null;
+    try {
+        payload = JSON.parse(text);
+    }
+    catch {
+        const snippet = text.slice(0, 140).trim();
+        throw new Error(snippet || "Unexpected non-JSON response from the server.");
+    }
+    if (!response.ok) {
+        throw new Error(payload.error || "Request failed.");
+    }
+    return payload;
+}
 function getSelectedVideos() {
     const videos = state.lastYtPayload?.videos ?? [];
     return videos.filter((video) => {
@@ -91,40 +81,75 @@ function getSelectedVideos() {
     });
 }
 function updateSelectionRibbon() {
-    selectionCount.textContent = `${getSelectedVideos().length} selected`;
+    const selectionCount = maybeById("selection-count");
+    if (selectionCount) {
+        selectionCount.textContent = `${getSelectedVideos().length} selected`;
+    }
 }
 function renderSystemStatus(payload) {
     state.system = payload;
-    const authReady = Boolean(payload.auth_ready);
-    const pythonReady = Boolean(payload.python_ready);
-    const resolvedMode = payload.server_mode === "production" ? "Production mode" : "Local mode";
-    const resolvedAuthSource = payload.auth_source === "env"
-        ? "Authenticated from environment secret"
-        : payload.auth_source === "storage-file"
-            ? "Authenticated from local storage file"
-            : payload.auth_source === "env-invalid"
-                ? "Inline auth is present but invalid"
-                : "Login still required";
-    authState.textContent = authReady ? "Ready" : "Needs login";
-    authSource.textContent = resolvedAuthSource;
-    pythonState.textContent = pythonReady ? "Environment found" : "Python missing";
-    pythonPath.textContent = payload.python_executable || "Unavailable";
-    serverMode.textContent = resolvedMode;
-    outputRoot.textContent = payload.outputs_root || "Unavailable";
-    loginCommand.textContent = payload.login_command || ".\\notebooklm.cmd login";
-    deployHint.textContent = payload.deploy_auth_hint || "Run NotebookLM login before the first pipeline.";
-    systemModePill.textContent = `${resolvedMode} · ${authReady ? "auth ready" : "auth pending"}`;
-    systemDot.classList.toggle("is-ready", authReady && pythonReady);
-    systemDot.classList.toggle("is-warning", !authReady && pythonReady);
-    systemDot.classList.toggle("is-error", !pythonReady);
-}
-async function fetchJson(url, options) {
-    const response = await fetch(url, options);
-    const payload = (await response.json());
-    if (!response.ok) {
-        throw new Error(payload.error || "Request failed.");
+    const siteAuthState = maybeById("site-auth-state");
+    const siteAuthDetail = maybeById("site-auth-detail");
+    const researchState = maybeById("research-state");
+    const researchDetail = maybeById("research-detail");
+    const notebookState = maybeById("notebook-state");
+    const notebookDetail = maybeById("notebook-detail");
+    const workspaceState = maybeById("workspace-state");
+    const workspaceDetail = maybeById("workspace-detail");
+    const workspaceNote = maybeById("workspace-note");
+    if (siteAuthState) {
+        siteAuthState.textContent = payload.site_auth.authenticated ? "Connected" : "Not connected";
     }
-    return payload;
+    if (siteAuthDetail) {
+        if (payload.site_auth.authenticated) {
+            siteAuthDetail.textContent = payload.site_auth.user?.email || "Signed in";
+        }
+        else if (payload.site_auth.google_oauth_configured) {
+            siteAuthDetail.textContent = "Sign in with Google to unlock the workspace.";
+        }
+        else {
+            siteAuthDetail.textContent = "Google login is not configured for this deployment.";
+        }
+    }
+    if (researchState) {
+        if (!payload.site_auth.authenticated) {
+            researchState.textContent = "Locked";
+        }
+        else {
+            researchState.textContent = payload.yt_research_ready ? "Ready" : "Offline";
+        }
+    }
+    if (researchDetail) {
+        researchDetail.textContent = payload.site_auth.authenticated
+            ? payload.yt_research_ready
+                ? "YouTube metadata search is available."
+                : "The Python backend is not ready for search."
+            : "Login is required before users can run topic research.";
+    }
+    if (notebookState) {
+        notebookState.textContent = payload.notebooklm_ready ? "Connected" : "Not ready";
+    }
+    if (notebookDetail) {
+        notebookDetail.textContent = payload.notebooklm_ready
+            ? `Backend auth source: ${payload.auth_source || "connected"}`
+            : payload.deploy_auth_hint || "NotebookLM backend auth is still missing.";
+    }
+    if (workspaceState) {
+        workspaceState.textContent = payload.workspace_ready
+            ? "Operational"
+            : payload.site_auth.authenticated
+                ? "Partially ready"
+                : "Locked";
+    }
+    if (workspaceDetail) {
+        workspaceDetail.textContent = payload.workspace_detail || "Workspace status unavailable.";
+    }
+    if (workspaceNote) {
+        workspaceNote.className = payload.notebooklm_ready ? "message message-info" : "message message-warning";
+        workspaceNote.textContent = payload.notebooklm_ready
+            ? `Google login is active. NotebookLM is connected in ${payload.pipeline_delivery_mode || "background"} mode.`
+            : payload.deploy_auth_hint || "NotebookLM backend auth is not configured yet.";
+    }
 }
 async function loadSystemStatus() {
     try {
@@ -133,18 +158,27 @@ async function loadSystemStatus() {
     }
     catch (error) {
         const message = error instanceof Error ? error.message : "Status endpoint failed.";
-        authState.textContent = "Unavailable";
-        authSource.textContent = message;
-        pythonState.textContent = "Unavailable";
-        pythonPath.textContent = "Unavailable";
-        serverMode.textContent = "Unavailable";
-        outputRoot.textContent = "Unavailable";
-        deployHint.textContent = message;
-        systemModePill.textContent = "Status unavailable";
-        systemDot.classList.add("is-error");
+        const elements = [
+            maybeById("site-auth-detail"),
+            maybeById("research-detail"),
+            maybeById("notebook-detail"),
+            maybeById("workspace-detail"),
+        ];
+        elements.forEach((element) => {
+            if (element) {
+                element.textContent = message;
+            }
+        });
     }
 }
 function renderYtResults(payload, resetSelection) {
+    const ytMeta = maybeById("yt-meta");
+    const ytResults = maybeById("yt-results");
+    const videoGrid = maybeById("video-grid");
+    const nlTitle = maybeById("nl-title");
+    if (!ytMeta || !ytResults || !videoGrid) {
+        return;
+    }
     const videos = payload.videos ?? [];
     state.lastYtPayload = payload;
     if (resetSelection) {
@@ -180,8 +214,8 @@ function renderYtResults(payload, resetSelection) {
         .join("");
     updateSelectionRibbon();
     ytResults.hidden = false;
-    if (!nlTitle.value.trim() && payload.query) {
-        nlTitle.value = `YouTube Research: ${payload.query}`;
+    if (nlTitle && !nlTitle.value.trim() && payload.query) {
+        nlTitle.value = `LLMNoteTube Research: ${payload.query}`;
     }
 }
 function parseNotebookPayload(rawValue) {
@@ -203,9 +237,16 @@ function parseNotebookPayload(rawValue) {
     return { urls };
 }
 function fillNotebookTextareaFromSelection() {
+    const nlStatus = maybeById("nl-status");
+    const nlUrls = maybeById("nl-urls");
+    if (!nlUrls) {
+        return;
+    }
     const selectedVideos = getSelectedVideos();
     if (!selectedVideos.length) {
-        setMessage(nlStatus, "Select at least one video first.", "warning");
+        if (nlStatus) {
+            setMessage(nlStatus, "Select at least one video first.", "warning");
+        }
         return;
     }
     const payload = {
@@ -216,31 +257,39 @@ function fillNotebookTextareaFromSelection() {
         videos: selectedVideos,
     };
     nlUrls.value = JSON.stringify(payload, null, 2);
-    byId("pipeline-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+    maybeById("pipeline-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 function renderSummaryCards(result) {
+    const resultSummary = maybeById("result-summary");
+    if (!resultSummary) {
+        return;
+    }
     const notebook = result.notebook ?? {};
     const readySources = result.sources?.ready_sources ?? [];
     const artifactCount = result.artifacts?.length ?? 0;
     resultSummary.innerHTML = `
     <div class="summary-card">
-      <span class="card-label">Notebook</span>
+      <span class="status-label">Notebook</span>
       <strong>${escapeHtml(notebook.title || "Untitled notebook")}</strong>
       <span>${escapeHtml(notebook.id || "No ID")}</span>
     </div>
     <div class="summary-card">
-      <span class="card-label">Ready sources</span>
+      <span class="status-label">Ready sources</span>
       <strong>${readySources.length}</strong>
       <span>Imported into NotebookLM</span>
     </div>
     <div class="summary-card">
-      <span class="card-label">Artifacts</span>
+      <span class="status-label">Artifacts</span>
       <strong>${artifactCount}</strong>
       <span>Generated files</span>
     </div>
   `;
 }
 function renderArtifacts(job) {
+    const artifactDownloads = maybeById("nl-artifacts");
+    if (!artifactDownloads) {
+        return;
+    }
     const items = job.artifacts ?? [];
     artifactDownloads.innerHTML = "";
     if (!items.length) {
@@ -260,13 +309,20 @@ function renderArtifacts(job) {
             link.classList.add("is-disabled");
         }
         link.innerHTML = `
-      <span class="card-label">${escapeHtml(item.kind || "artifact")}</span>
+      <span class="status-label">${escapeHtml(item.kind || "artifact")}</span>
       <strong>${escapeHtml(item.name || "Download")}</strong>
     `;
         artifactDownloads.appendChild(link);
     });
 }
 function showNotebookResult(job) {
+    const resultPanel = maybeById("result-panel");
+    const analysisAnswer = maybeById("analysis-answer");
+    const citationCount = maybeById("citation-count");
+    const rawJson = maybeById("raw-json");
+    if (!resultPanel || !analysisAnswer || !citationCount || !rawJson) {
+        return;
+    }
     const result = job.result ?? {};
     const analysis = result.analysis ?? {};
     renderSummaryCards(result);
@@ -284,6 +340,10 @@ function stopProgressAnimation() {
     }
 }
 function startProgressAnimation() {
+    const jobProgressBar = maybeById("job-progress-bar");
+    if (!jobProgressBar) {
+        return;
+    }
     stopProgressAnimation();
     state.pulseValue = 18;
     jobProgressBar.style.width = `${state.pulseValue}%`;
@@ -302,6 +362,14 @@ function stopPolling() {
     }
 }
 function pollJob(jobId, submitButton) {
+    const nlStatus = maybeById("nl-status");
+    const nlProgress = maybeById("nl-job-progress");
+    const jobStage = maybeById("job-stage");
+    const jobHelper = maybeById("job-helper");
+    const jobProgressBar = maybeById("job-progress-bar");
+    if (!nlStatus || !nlProgress || !jobStage || !jobHelper || !jobProgressBar) {
+        return;
+    }
     stopPolling();
     startProgressAnimation();
     state.pollTimer = window.setInterval(async () => {
@@ -339,20 +407,25 @@ function pollJob(jobId, submitButton) {
         }
     }, 2500);
 }
-function attachEventHandlers() {
-    const scrollSearch = byId("scroll-to-search");
-    const scrollPipeline = byId("scroll-to-pipeline");
-    const scrollWorkspace = byId("scroll-to-workspace");
-    scrollSearch.addEventListener("click", () => {
-        byId("search-panel").scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-    scrollPipeline.addEventListener("click", () => {
-        byId("pipeline-panel").scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-    scrollWorkspace.addEventListener("click", () => {
-        byId("workspace").scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-    byId("clear-results").addEventListener("click", () => {
+function attachWorkspaceHandlers() {
+    const ytForm = maybeById("yt-form");
+    const nlForm = maybeById("nl-form");
+    if (!ytForm || !nlForm) {
+        return;
+    }
+    const ytStatus = byId("yt-status");
+    const ytWarning = byId("yt-warning");
+    const ytResults = byId("yt-results");
+    const videoGrid = byId("video-grid");
+    const nlStatus = byId("nl-status");
+    const nlUrls = byId("nl-urls");
+    const nlTitle = byId("nl-title");
+    const nlAnalysis = byId("nl-analysis");
+    const nlProgress = byId("nl-job-progress");
+    const jobStage = byId("job-stage");
+    const jobHelper = byId("job-helper");
+    const resultPanel = byId("result-panel");
+    maybeById("clear-results")?.addEventListener("click", () => {
         state.lastYtPayload = null;
         state.selectedVideoUrls.clear();
         ytResults.hidden = true;
@@ -361,7 +434,7 @@ function attachEventHandlers() {
         clearMessage(ytStatus);
         clearMessage(ytWarning);
     });
-    byId("select-all-videos").addEventListener("click", () => {
+    maybeById("select-all-videos")?.addEventListener("click", () => {
         (state.lastYtPayload?.videos ?? []).forEach((video) => {
             if (video.url) {
                 state.selectedVideoUrls.add(video.url);
@@ -369,11 +442,11 @@ function attachEventHandlers() {
         });
         renderYtResults(state.lastYtPayload ?? { videos: [] }, false);
     });
-    byId("clear-selection").addEventListener("click", () => {
+    maybeById("clear-selection")?.addEventListener("click", () => {
         state.selectedVideoUrls.clear();
         renderYtResults(state.lastYtPayload ?? { videos: [] }, false);
     });
-    byId("copy-selected-urls").addEventListener("click", async () => {
+    maybeById("copy-selected-urls")?.addEventListener("click", async () => {
         const urls = getSelectedVideos()
             .map((video) => video.url ?? "")
             .filter(Boolean);
@@ -389,7 +462,7 @@ function attachEventHandlers() {
             setMessage(ytStatus, "Clipboard access failed. Copy from the NotebookLM field instead.", "warning");
         }
     });
-    byId("use-in-notebooklm").addEventListener("click", fillNotebookTextareaFromSelection);
+    maybeById("use-in-notebooklm")?.addEventListener("click", fillNotebookTextareaFromSelection);
     videoGrid.addEventListener("change", (event) => {
         const target = event.target;
         if (!(target instanceof HTMLInputElement) || !target.classList.contains("video-toggle")) {
@@ -415,7 +488,7 @@ function attachEventHandlers() {
             }
         });
     });
-    byId("clear-pipeline").addEventListener("click", () => {
+    maybeById("clear-pipeline")?.addEventListener("click", () => {
         nlForm.reset();
         clearMessage(nlStatus);
         nlProgress.hidden = true;
@@ -426,6 +499,10 @@ function attachEventHandlers() {
     ytForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const submitButton = byId("yt-submit");
+        if (!state.system?.site_auth.authenticated) {
+            setMessage(ytStatus, "Login with Google before running research.", "warning");
+            return;
+        }
         submitButton.disabled = true;
         clearMessage(ytStatus);
         clearMessage(ytWarning);
@@ -461,8 +538,12 @@ function attachEventHandlers() {
         const submitButton = byId("nl-submit");
         clearMessage(nlStatus);
         resultPanel.hidden = true;
-        if (!state.system?.auth_ready) {
-            setMessage(nlStatus, `NotebookLM login is still required. Open a separate terminal and run ${state.system?.login_command || ".\\notebooklm.cmd login"}.`, "warning");
+        if (!state.system?.site_auth.authenticated) {
+            setMessage(nlStatus, "Login with Google before using the workspace.", "warning");
+            return;
+        }
+        if (!state.system?.notebooklm_ready) {
+            setMessage(nlStatus, state.system?.deploy_auth_hint || "NotebookLM backend is not ready yet.", "warning");
             return;
         }
         const artifacts = Array.from(document.querySelectorAll('input[name="artifact"]:checked')).map((input) => input.value);
@@ -502,6 +583,16 @@ function attachEventHandlers() {
                 headers: { "Content-Type": "application/json" },
                 method: "POST",
             });
+            if (payload.mode === "direct") {
+                submitButton.disabled = false;
+                nlProgress.hidden = true;
+                setMessage(nlStatus, "NotebookLM pipeline finished successfully.", "success");
+                showNotebookResult({
+                    artifacts: payload.artifacts,
+                    result: payload.result,
+                });
+                return;
+            }
             pollJob(payload.job_id, submitButton);
         }
         catch (error) {
@@ -513,4 +604,4 @@ function attachEventHandlers() {
     });
 }
 void loadSystemStatus();
-attachEventHandlers();
+attachWorkspaceHandlers();

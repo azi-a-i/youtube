@@ -1,15 +1,36 @@
+interface BootstrapUser {
+  email?: string;
+  name?: string;
+  picture?: string;
+}
+
+interface BootstrapPayload {
+  google_oauth_configured?: boolean;
+  page?: string;
+  user?: BootstrapUser | null;
+}
+
+interface SiteAuthStatus {
+  authenticated: boolean;
+  google_oauth_configured: boolean;
+  login_url?: string;
+  logout_url?: string;
+  user?: BootstrapUser | null;
+}
+
 interface SystemStatus {
-  auth_env_var?: string;
-  auth_ready: boolean;
   auth_source?: string;
   deploy_auth_hint?: string;
-  login_command?: string;
+  notebooklm_ready: boolean;
   outputs_root?: string;
-  port?: string;
+  pipeline_delivery_mode?: string;
   python_executable?: string;
   python_ready: boolean;
-  run_command?: string;
   server_mode?: string;
+  site_auth: SiteAuthStatus;
+  workspace_detail?: string;
+  workspace_ready: boolean;
+  yt_research_ready: boolean;
 }
 
 interface VideoResult {
@@ -24,7 +45,6 @@ interface VideoResult {
 }
 
 interface YtResearchPayload {
-  candidate_pool?: number;
   query?: string;
   returned_count?: number;
   search_mode?: string;
@@ -33,18 +53,9 @@ interface YtResearchPayload {
   warnings?: string[];
 }
 
-interface AnalysisReference {
-  citation_number?: number;
-  source_id?: string;
-}
-
 interface NotebookAnalysis {
   answer?: string;
-  references?: AnalysisReference[];
-}
-
-interface NotebookSourceResult {
-  ready_sources?: Array<{ id?: string }>;
+  references?: Array<{ citation_number?: number; source_id?: string }>;
 }
 
 interface ArtifactLink {
@@ -60,7 +71,9 @@ interface NotebookPipelineResult {
     id?: string;
     title?: string;
   };
-  sources?: NotebookSourceResult;
+  sources?: {
+    ready_sources?: Array<{ id?: string }>;
+  };
 }
 
 interface JobPayload {
@@ -71,15 +84,25 @@ interface JobPayload {
   status?: string;
 }
 
+type PipelineResponse =
+  | { job_id: string; mode: "background" }
+  | { artifacts?: ArtifactLink[]; mode: "direct"; result: NotebookPipelineResult };
+
 type MessageKind = "info" | "success" | "warning" | "error";
 
+const bootstrapWindow = window as Window & {
+  LLMNOTETUBE_BOOTSTRAP?: BootstrapPayload;
+};
+
+const bootstrap = bootstrapWindow.LLMNOTETUBE_BOOTSTRAP ?? {};
+
 const state = {
-  system: null as SystemStatus | null,
   lastYtPayload: null as YtResearchPayload | null,
+  pollTimer: null as number | null,
   pulseTimer: null as number | null,
   pulseValue: 10,
-  pollTimer: null as number | null,
   selectedVideoUrls: new Set<string>(),
+  system: null as SystemStatus | null,
 };
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -90,41 +113,10 @@ function byId<T extends HTMLElement>(id: string): T {
   return element as T;
 }
 
-const ytForm = byId<HTMLFormElement>("yt-form");
-const ytStatus = byId<HTMLElement>("yt-status");
-const ytWarning = byId<HTMLElement>("yt-warning");
-const ytResults = byId<HTMLElement>("yt-results");
-const ytMeta = byId<HTMLElement>("yt-meta");
-const videoGrid = byId<HTMLElement>("video-grid");
-const selectionCount = byId<HTMLElement>("selection-count");
-
-const nlForm = byId<HTMLFormElement>("nl-form");
-const nlStatus = byId<HTMLElement>("nl-status");
-const nlUrls = byId<HTMLTextAreaElement>("nl-urls");
-const nlTitle = byId<HTMLInputElement>("nl-title");
-const nlAnalysis = byId<HTMLTextAreaElement>("nl-analysis");
-const nlProgress = byId<HTMLElement>("nl-job-progress");
-const jobStage = byId<HTMLElement>("job-stage");
-const jobHelper = byId<HTMLElement>("job-helper");
-const jobProgressBar = byId<HTMLElement>("job-progress-bar");
-
-const resultPanel = byId<HTMLElement>("result-panel");
-const resultSummary = byId<HTMLElement>("result-summary");
-const analysisAnswer = byId<HTMLElement>("analysis-answer");
-const citationCount = byId<HTMLElement>("citation-count");
-const artifactDownloads = byId<HTMLElement>("nl-artifacts");
-const rawJson = byId<HTMLElement>("raw-json");
-
-const systemModePill = byId<HTMLElement>("system-mode-pill");
-const systemDot = byId<HTMLElement>("system-dot");
-const authState = byId<HTMLElement>("auth-state");
-const authSource = byId<HTMLElement>("auth-source");
-const pythonState = byId<HTMLElement>("python-state");
-const pythonPath = byId<HTMLElement>("python-path");
-const serverMode = byId<HTMLElement>("server-mode");
-const outputRoot = byId<HTMLElement>("output-root");
-const loginCommand = byId<HTMLElement>("login-command");
-const deployHint = byId<HTMLElement>("deploy-hint");
+function maybeById<T extends HTMLElement>(id: string): T | null {
+  const element = document.getElementById(id);
+  return element instanceof HTMLElement ? (element as T) : null;
+}
 
 function setMessage(element: HTMLElement, message: string, type: MessageKind): void {
   element.textContent = message;
@@ -168,6 +160,24 @@ function formatParagraphs(text: string | null | undefined): string {
     .join("");
 }
 
+async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(url, options);
+  const text = await response.text();
+
+  let payload: (T & { error?: string }) | null = null;
+  try {
+    payload = JSON.parse(text) as T & { error?: string };
+  } catch {
+    const snippet = text.slice(0, 140).trim();
+    throw new Error(snippet || "Unexpected non-JSON response from the server.");
+  }
+
+  if (!response.ok) {
+    throw new Error(payload.error || "Request failed.");
+  }
+  return payload;
+}
+
 function getSelectedVideos(): VideoResult[] {
   const videos = state.lastYtPayload?.videos ?? [];
   return videos.filter((video) => {
@@ -177,46 +187,79 @@ function getSelectedVideos(): VideoResult[] {
 }
 
 function updateSelectionRibbon(): void {
-  selectionCount.textContent = `${getSelectedVideos().length} selected`;
+  const selectionCount = maybeById<HTMLElement>("selection-count");
+  if (selectionCount) {
+    selectionCount.textContent = `${getSelectedVideos().length} selected`;
+  }
 }
 
 function renderSystemStatus(payload: SystemStatus): void {
   state.system = payload;
 
-  const authReady = Boolean(payload.auth_ready);
-  const pythonReady = Boolean(payload.python_ready);
-  const resolvedMode = payload.server_mode === "production" ? "Production mode" : "Local mode";
-  const resolvedAuthSource =
-    payload.auth_source === "env"
-      ? "Authenticated from environment secret"
-      : payload.auth_source === "storage-file"
-        ? "Authenticated from local storage file"
-        : payload.auth_source === "env-invalid"
-          ? "Inline auth is present but invalid"
-          : "Login still required";
+  const siteAuthState = maybeById<HTMLElement>("site-auth-state");
+  const siteAuthDetail = maybeById<HTMLElement>("site-auth-detail");
+  const researchState = maybeById<HTMLElement>("research-state");
+  const researchDetail = maybeById<HTMLElement>("research-detail");
+  const notebookState = maybeById<HTMLElement>("notebook-state");
+  const notebookDetail = maybeById<HTMLElement>("notebook-detail");
+  const workspaceState = maybeById<HTMLElement>("workspace-state");
+  const workspaceDetail = maybeById<HTMLElement>("workspace-detail");
+  const workspaceNote = maybeById<HTMLElement>("workspace-note");
 
-  authState.textContent = authReady ? "Ready" : "Needs login";
-  authSource.textContent = resolvedAuthSource;
-  pythonState.textContent = pythonReady ? "Environment found" : "Python missing";
-  pythonPath.textContent = payload.python_executable || "Unavailable";
-  serverMode.textContent = resolvedMode;
-  outputRoot.textContent = payload.outputs_root || "Unavailable";
-  loginCommand.textContent = payload.login_command || ".\\notebooklm.cmd login";
-  deployHint.textContent = payload.deploy_auth_hint || "Run NotebookLM login before the first pipeline.";
-  systemModePill.textContent = `${resolvedMode} · ${authReady ? "auth ready" : "auth pending"}`;
-
-  systemDot.classList.toggle("is-ready", authReady && pythonReady);
-  systemDot.classList.toggle("is-warning", !authReady && pythonReady);
-  systemDot.classList.toggle("is-error", !pythonReady);
-}
-
-async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, options);
-  const payload = (await response.json()) as T & { error?: string };
-  if (!response.ok) {
-    throw new Error(payload.error || "Request failed.");
+  if (siteAuthState) {
+    siteAuthState.textContent = payload.site_auth.authenticated ? "Connected" : "Not connected";
   }
-  return payload;
+  if (siteAuthDetail) {
+    if (payload.site_auth.authenticated) {
+      siteAuthDetail.textContent = payload.site_auth.user?.email || "Signed in";
+    } else if (payload.site_auth.google_oauth_configured) {
+      siteAuthDetail.textContent = "Sign in with Google to unlock the workspace.";
+    } else {
+      siteAuthDetail.textContent = "Google login is not configured for this deployment.";
+    }
+  }
+
+  if (researchState) {
+    if (!payload.site_auth.authenticated) {
+      researchState.textContent = "Locked";
+    } else {
+      researchState.textContent = payload.yt_research_ready ? "Ready" : "Offline";
+    }
+  }
+  if (researchDetail) {
+    researchDetail.textContent = payload.site_auth.authenticated
+      ? payload.yt_research_ready
+        ? "YouTube metadata search is available."
+        : "The Python backend is not ready for search."
+      : "Login is required before users can run topic research.";
+  }
+
+  if (notebookState) {
+    notebookState.textContent = payload.notebooklm_ready ? "Connected" : "Not ready";
+  }
+  if (notebookDetail) {
+    notebookDetail.textContent = payload.notebooklm_ready
+      ? `Backend auth source: ${payload.auth_source || "connected"}`
+      : payload.deploy_auth_hint || "NotebookLM backend auth is still missing.";
+  }
+
+  if (workspaceState) {
+    workspaceState.textContent = payload.workspace_ready
+      ? "Operational"
+      : payload.site_auth.authenticated
+        ? "Partially ready"
+        : "Locked";
+  }
+  if (workspaceDetail) {
+    workspaceDetail.textContent = payload.workspace_detail || "Workspace status unavailable.";
+  }
+
+  if (workspaceNote) {
+    workspaceNote.className = payload.notebooklm_ready ? "message message-info" : "message message-warning";
+    workspaceNote.textContent = payload.notebooklm_ready
+      ? `Google login is active. NotebookLM is connected in ${payload.pipeline_delivery_mode || "background"} mode.`
+      : payload.deploy_auth_hint || "NotebookLM backend auth is not configured yet.";
+  }
 }
 
 async function loadSystemStatus(): Promise<void> {
@@ -225,19 +268,29 @@ async function loadSystemStatus(): Promise<void> {
     renderSystemStatus(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Status endpoint failed.";
-    authState.textContent = "Unavailable";
-    authSource.textContent = message;
-    pythonState.textContent = "Unavailable";
-    pythonPath.textContent = "Unavailable";
-    serverMode.textContent = "Unavailable";
-    outputRoot.textContent = "Unavailable";
-    deployHint.textContent = message;
-    systemModePill.textContent = "Status unavailable";
-    systemDot.classList.add("is-error");
+    const elements = [
+      maybeById<HTMLElement>("site-auth-detail"),
+      maybeById<HTMLElement>("research-detail"),
+      maybeById<HTMLElement>("notebook-detail"),
+      maybeById<HTMLElement>("workspace-detail"),
+    ];
+    elements.forEach((element) => {
+      if (element) {
+        element.textContent = message;
+      }
+    });
   }
 }
 
 function renderYtResults(payload: YtResearchPayload, resetSelection: boolean): void {
+  const ytMeta = maybeById<HTMLElement>("yt-meta");
+  const ytResults = maybeById<HTMLElement>("yt-results");
+  const videoGrid = maybeById<HTMLElement>("video-grid");
+  const nlTitle = maybeById<HTMLInputElement>("nl-title");
+  if (!ytMeta || !ytResults || !videoGrid) {
+    return;
+  }
+
   const videos = payload.videos ?? [];
   state.lastYtPayload = payload;
 
@@ -279,8 +332,8 @@ function renderYtResults(payload: YtResearchPayload, resetSelection: boolean): v
   updateSelectionRibbon();
   ytResults.hidden = false;
 
-  if (!nlTitle.value.trim() && payload.query) {
-    nlTitle.value = `YouTube Research: ${payload.query}`;
+  if (nlTitle && !nlTitle.value.trim() && payload.query) {
+    nlTitle.value = `LLMNoteTube Research: ${payload.query}`;
   }
 }
 
@@ -306,9 +359,17 @@ function parseNotebookPayload(rawValue: string): { urls?: string[] } | Record<st
 }
 
 function fillNotebookTextareaFromSelection(): void {
+  const nlStatus = maybeById<HTMLElement>("nl-status");
+  const nlUrls = maybeById<HTMLTextAreaElement>("nl-urls");
+  if (!nlUrls) {
+    return;
+  }
+
   const selectedVideos = getSelectedVideos();
   if (!selectedVideos.length) {
-    setMessage(nlStatus, "Select at least one video first.", "warning");
+    if (nlStatus) {
+      setMessage(nlStatus, "Select at least one video first.", "warning");
+    }
     return;
   }
 
@@ -321,27 +382,32 @@ function fillNotebookTextareaFromSelection(): void {
   };
 
   nlUrls.value = JSON.stringify(payload, null, 2);
-  byId<HTMLElement>("pipeline-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+  maybeById<HTMLElement>("pipeline-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderSummaryCards(result: NotebookPipelineResult): void {
+  const resultSummary = maybeById<HTMLElement>("result-summary");
+  if (!resultSummary) {
+    return;
+  }
+
   const notebook = result.notebook ?? {};
   const readySources = result.sources?.ready_sources ?? [];
   const artifactCount = result.artifacts?.length ?? 0;
 
   resultSummary.innerHTML = `
     <div class="summary-card">
-      <span class="card-label">Notebook</span>
+      <span class="status-label">Notebook</span>
       <strong>${escapeHtml(notebook.title || "Untitled notebook")}</strong>
       <span>${escapeHtml(notebook.id || "No ID")}</span>
     </div>
     <div class="summary-card">
-      <span class="card-label">Ready sources</span>
+      <span class="status-label">Ready sources</span>
       <strong>${readySources.length}</strong>
       <span>Imported into NotebookLM</span>
     </div>
     <div class="summary-card">
-      <span class="card-label">Artifacts</span>
+      <span class="status-label">Artifacts</span>
       <strong>${artifactCount}</strong>
       <span>Generated files</span>
     </div>
@@ -349,6 +415,11 @@ function renderSummaryCards(result: NotebookPipelineResult): void {
 }
 
 function renderArtifacts(job: JobPayload): void {
+  const artifactDownloads = maybeById<HTMLElement>("nl-artifacts");
+  if (!artifactDownloads) {
+    return;
+  }
+
   const items = job.artifacts ?? [];
   artifactDownloads.innerHTML = "";
 
@@ -369,7 +440,7 @@ function renderArtifacts(job: JobPayload): void {
       link.classList.add("is-disabled");
     }
     link.innerHTML = `
-      <span class="card-label">${escapeHtml(item.kind || "artifact")}</span>
+      <span class="status-label">${escapeHtml(item.kind || "artifact")}</span>
       <strong>${escapeHtml(item.name || "Download")}</strong>
     `;
     artifactDownloads.appendChild(link);
@@ -377,6 +448,14 @@ function renderArtifacts(job: JobPayload): void {
 }
 
 function showNotebookResult(job: JobPayload): void {
+  const resultPanel = maybeById<HTMLElement>("result-panel");
+  const analysisAnswer = maybeById<HTMLElement>("analysis-answer");
+  const citationCount = maybeById<HTMLElement>("citation-count");
+  const rawJson = maybeById<HTMLElement>("raw-json");
+  if (!resultPanel || !analysisAnswer || !citationCount || !rawJson) {
+    return;
+  }
+
   const result = job.result ?? {};
   const analysis = result.analysis ?? {};
   renderSummaryCards(result);
@@ -396,6 +475,11 @@ function stopProgressAnimation(): void {
 }
 
 function startProgressAnimation(): void {
+  const jobProgressBar = maybeById<HTMLElement>("job-progress-bar");
+  if (!jobProgressBar) {
+    return;
+  }
+
   stopProgressAnimation();
   state.pulseValue = 18;
   jobProgressBar.style.width = `${state.pulseValue}%`;
@@ -416,6 +500,15 @@ function stopPolling(): void {
 }
 
 function pollJob(jobId: string, submitButton: HTMLButtonElement): void {
+  const nlStatus = maybeById<HTMLElement>("nl-status");
+  const nlProgress = maybeById<HTMLElement>("nl-job-progress");
+  const jobStage = maybeById<HTMLElement>("job-stage");
+  const jobHelper = maybeById<HTMLElement>("job-helper");
+  const jobProgressBar = maybeById<HTMLElement>("job-progress-bar");
+  if (!nlStatus || !nlProgress || !jobStage || !jobHelper || !jobProgressBar) {
+    return;
+  }
+
   stopPolling();
   startProgressAnimation();
 
@@ -454,24 +547,27 @@ function pollJob(jobId: string, submitButton: HTMLButtonElement): void {
   }, 2500);
 }
 
-function attachEventHandlers(): void {
-  const scrollSearch = byId<HTMLButtonElement>("scroll-to-search");
-  const scrollPipeline = byId<HTMLButtonElement>("scroll-to-pipeline");
-  const scrollWorkspace = byId<HTMLButtonElement>("scroll-to-workspace");
+function attachWorkspaceHandlers(): void {
+  const ytForm = maybeById<HTMLFormElement>("yt-form");
+  const nlForm = maybeById<HTMLFormElement>("nl-form");
+  if (!ytForm || !nlForm) {
+    return;
+  }
 
-  scrollSearch.addEventListener("click", () => {
-    byId<HTMLElement>("search-panel").scrollIntoView({ behavior: "smooth", block: "start" });
-  });
+  const ytStatus = byId<HTMLElement>("yt-status");
+  const ytWarning = byId<HTMLElement>("yt-warning");
+  const ytResults = byId<HTMLElement>("yt-results");
+  const videoGrid = byId<HTMLElement>("video-grid");
+  const nlStatus = byId<HTMLElement>("nl-status");
+  const nlUrls = byId<HTMLTextAreaElement>("nl-urls");
+  const nlTitle = byId<HTMLInputElement>("nl-title");
+  const nlAnalysis = byId<HTMLTextAreaElement>("nl-analysis");
+  const nlProgress = byId<HTMLElement>("nl-job-progress");
+  const jobStage = byId<HTMLElement>("job-stage");
+  const jobHelper = byId<HTMLElement>("job-helper");
+  const resultPanel = byId<HTMLElement>("result-panel");
 
-  scrollPipeline.addEventListener("click", () => {
-    byId<HTMLElement>("pipeline-panel").scrollIntoView({ behavior: "smooth", block: "start" });
-  });
-
-  scrollWorkspace.addEventListener("click", () => {
-    byId<HTMLElement>("workspace").scrollIntoView({ behavior: "smooth", block: "start" });
-  });
-
-  byId<HTMLButtonElement>("clear-results").addEventListener("click", () => {
+  maybeById<HTMLButtonElement>("clear-results")?.addEventListener("click", () => {
     state.lastYtPayload = null;
     state.selectedVideoUrls.clear();
     ytResults.hidden = true;
@@ -481,7 +577,7 @@ function attachEventHandlers(): void {
     clearMessage(ytWarning);
   });
 
-  byId<HTMLButtonElement>("select-all-videos").addEventListener("click", () => {
+  maybeById<HTMLButtonElement>("select-all-videos")?.addEventListener("click", () => {
     (state.lastYtPayload?.videos ?? []).forEach((video) => {
       if (video.url) {
         state.selectedVideoUrls.add(video.url);
@@ -490,16 +586,15 @@ function attachEventHandlers(): void {
     renderYtResults(state.lastYtPayload ?? { videos: [] }, false);
   });
 
-  byId<HTMLButtonElement>("clear-selection").addEventListener("click", () => {
+  maybeById<HTMLButtonElement>("clear-selection")?.addEventListener("click", () => {
     state.selectedVideoUrls.clear();
     renderYtResults(state.lastYtPayload ?? { videos: [] }, false);
   });
 
-  byId<HTMLButtonElement>("copy-selected-urls").addEventListener("click", async () => {
+  maybeById<HTMLButtonElement>("copy-selected-urls")?.addEventListener("click", async () => {
     const urls = getSelectedVideos()
       .map((video) => video.url ?? "")
       .filter(Boolean);
-
     if (!urls.length) {
       setMessage(ytStatus, "No selected URLs to copy yet.", "warning");
       return;
@@ -513,7 +608,7 @@ function attachEventHandlers(): void {
     }
   });
 
-  byId<HTMLButtonElement>("use-in-notebooklm").addEventListener("click", fillNotebookTextareaFromSelection);
+  maybeById<HTMLButtonElement>("use-in-notebooklm")?.addEventListener("click", fillNotebookTextareaFromSelection);
 
   videoGrid.addEventListener("change", (event) => {
     const target = event.target;
@@ -543,7 +638,7 @@ function attachEventHandlers(): void {
     });
   });
 
-  byId<HTMLButtonElement>("clear-pipeline").addEventListener("click", () => {
+  maybeById<HTMLButtonElement>("clear-pipeline")?.addEventListener("click", () => {
     nlForm.reset();
     clearMessage(nlStatus);
     nlProgress.hidden = true;
@@ -555,6 +650,12 @@ function attachEventHandlers(): void {
   ytForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const submitButton = byId<HTMLButtonElement>("yt-submit");
+
+    if (!state.system?.site_auth.authenticated) {
+      setMessage(ytStatus, "Login with Google before running research.", "warning");
+      return;
+    }
+
     submitButton.disabled = true;
     clearMessage(ytStatus);
     clearMessage(ytWarning);
@@ -592,12 +693,13 @@ function attachEventHandlers(): void {
     clearMessage(nlStatus);
     resultPanel.hidden = true;
 
-    if (!state.system?.auth_ready) {
-      setMessage(
-        nlStatus,
-        `NotebookLM login is still required. Open a separate terminal and run ${state.system?.login_command || ".\\notebooklm.cmd login"}.`,
-        "warning",
-      );
+    if (!state.system?.site_auth.authenticated) {
+      setMessage(nlStatus, "Login with Google before using the workspace.", "warning");
+      return;
+    }
+
+    if (!state.system?.notebooklm_ready) {
+      setMessage(nlStatus, state.system?.deploy_auth_hint || "NotebookLM backend is not ready yet.", "warning");
       return;
     }
 
@@ -639,11 +741,23 @@ function attachEventHandlers(): void {
     };
 
     try {
-      const payload = await fetchJson<{ job_id: string }>("/api/notebooklm/pipeline", {
+      const payload = await fetchJson<PipelineResponse>("/api/notebooklm/pipeline", {
         body: JSON.stringify(body),
         headers: { "Content-Type": "application/json" },
         method: "POST",
       });
+
+      if (payload.mode === "direct") {
+        submitButton.disabled = false;
+        nlProgress.hidden = true;
+        setMessage(nlStatus, "NotebookLM pipeline finished successfully.", "success");
+        showNotebookResult({
+          artifacts: payload.artifacts,
+          result: payload.result,
+        });
+        return;
+      }
+
       pollJob(payload.job_id, submitButton);
     } catch (error) {
       submitButton.disabled = false;
@@ -655,4 +769,4 @@ function attachEventHandlers(): void {
 }
 
 void loadSystemStatus();
-attachEventHandlers();
+attachWorkspaceHandlers();

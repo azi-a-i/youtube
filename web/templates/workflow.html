@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="section-stack">
+    <div class="section-heading">
+      <p class="eyebrow">How it works</p>
+      <h1>The LLMNoteTube workflow is designed to move from topic to deliverable without losing context.</h1>
+      <p class="hero-text">
+        The product is intentionally split into three stages so users can see what is ready,
+        what still needs setup, and where they are in the research journey.
+      </p>
+    </div>
+
+    <div class="process-grid">
+      <article class="process-card">
+        <span class="process-step">Stage 1</span>
+        <h3>Login and verify readiness</h3>
+        <p>Users authenticate with Google to unlock the workspace and immediately see whether research and NotebookLM services are online.</p>
+      </article>
+
+      <article class="process-card">
+        <span class="process-step">Stage 2</span>
+        <h3>Search and curate sources</h3>
+        <p>Teams enter a topic, review structured video results, and select the exact URLs worth sending into the notebook.</p>
+      </article>
+
+      <article class="process-card">
+        <span class="process-step">Stage 3</span>
+        <h3>Analyze and generate outputs</h3>
+        <p>NotebookLM receives the chosen sources, produces synthesis, and can generate artifacts once the backend connection is ready.</p>
+      </article>
+    </div>
+
+    <div class="workflow-notes">
+      <article class="feature-card">
+        <p class="status-label">User experience</p>
+        <p>Overview introduces the product, Workflow explains the path, and Workspace is where authenticated users actually run the pipeline.</p>
+      </article>
+      <article class="feature-card">
+        <p class="status-label">Important backend note</p>
+        <p>Google sign-in controls access to the site, while NotebookLM still depends on the backend having its own valid NotebookLM connection.</p>
+      </article>
+    </div>
+  </section>
+{% endblock %}

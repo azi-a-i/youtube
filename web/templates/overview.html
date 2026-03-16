@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="hero-shell">
+    <div class="hero-copy">
+      <p class="eyebrow">Research from signal, not noise</p>
+      <h1>LLMNoteTube turns YouTube discovery into NotebookLM-ready research workflows.</h1>
+      <p class="hero-text">
+        Start with a topic, surface the strongest videos, move only the best sources into NotebookLM,
+        and turn that notebook into analysis, slide decks, flashcards, and visual outputs.
+      </p>
+
+      <div class="hero-actions">
+        <a href="{{ url_for('workflow_page') }}" class="button button-secondary">See the workflow</a>
+        {% if current_user %}
+          <a href="{{ url_for('workspace_page') }}" class="button button-primary">Open workspace</a>
+        {% elif google_oauth_configured %}
+          <a href="{{ url_for('auth_login', next=url_for('workspace_page')) }}" class="button button-primary">Login to start</a>
+        {% else %}
+          <a href="{{ url_for('workspace_page') }}" class="button button-primary">View workspace</a>
+        {% endif %}
+      </div>
+
+      <div class="hero-command-card">
+        <p class="status-label">Ideal prompt</p>
+        <pre class="hero-command">Use LLMNoteTube to find the 25 latest trending videos on [topic], send them to NotebookLM, summarize the strongest findings, and generate a handwritten infographic.</pre>
+      </div>
+    </div>
+
+    <aside class="hero-side">
+      <div class="feature-card">
+        <p class="status-label">What makes it useful</p>
+        <ul class="feature-list">
+          <li>Curate a source set before you ever open NotebookLM</li>
+          <li>Keep research, synthesis, and artifacts in one guided flow</li>
+          <li>Show live workspace status before users start a run</li>
+        </ul>
+      </div>
+
+      <div class="feature-card tone-dark">
+        <p class="status-label">Google login unlocks</p>
+        <h3>Protected workspace access</h3>
+        <p>Users sign in with Google to access the research studio and see if the backend is ready for synthesis.</p>
+      </div>
+    </aside>
+  </section>
+
+  <section class="content-grid">
+    <article class="capability-card">
+      <p class="card-index">01</p>
+      <h3>Discover</h3>
+      <p>Search a topic, rank the freshest or most-viewed videos, and capture structured metadata without copying links by hand.</p>
+    </article>
+    <article class="capability-card">
+      <p class="card-index">02</p>
+      <h3>Synthesize</h3>
+      <p>Send a selected source set to NotebookLM and ask targeted questions about themes, contradictions, and tactics.</p>
+    </article>
+    <article class="capability-card">
+      <p class="card-index">03</p>
+      <h3>Deliver</h3>
+      <p>Request infographics, slide decks, and flashcards once the notebook has enough signal to produce useful outputs.</p>
+    </article>
+  </section>
+{% endblock %}
