@@ -51,6 +51,7 @@ This app is designed for a persistent Python host such as Render, Railway, Fly.i
 
 - root `requirements.txt`
 - root `app.py` for Vercel/Flask detection
+- `api/index.py` as an explicit Vercel function entrypoint
 - root `pyproject.toml` for Vercel's current Python builder
 - production WSGI entrypoint `wsgi.py`
 - Render blueprint `render.yaml`
@@ -79,6 +80,8 @@ The included `render.yaml` already points `OUTPUTS_ROOT` and `NOTEBOOKLM_HOME` a
 ### Vercel note
 
 Vercel can now build and serve the multi-page product shell and Google-gated workspace. The live NotebookLM pipeline is still limited by serverless constraints such as long-running subprocesses and non-persistent in-memory jobs, so Render or another persistent Python host remains the better production target for full use.
+
+The Vercel deployment now also includes a `vercel.json` rewrite map so `/`, `/overview`, `/workflow`, `/workspace`, `/auth/*`, `/api/*`, `/outputs/*`, and `/healthz` are routed to the Flask function explicitly.
 
 ## Usage
 

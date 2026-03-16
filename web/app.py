@@ -434,6 +434,7 @@ def run_notebooklm_pipeline(job_id: str, **kwargs: Any) -> None:
 
 
 @app.route("/")
+@app.route("/overview")
 def overview_page():
     return render_template("overview.html", **page_context("overview", "Overview"))
 
