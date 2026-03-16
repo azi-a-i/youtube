@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Research Studio</title>
+  <meta
+    name="description"
+    content="A modern research studio for YouTube discovery, NotebookLM synthesis, and artifact generation."
+  />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="page-glow glow-a"></div>
+  <div class="page-glow glow-b"></div>
+  <div class="page-grid"></div>
+
+  <header class="masthead">
+    <a class="brand-mark" href="#top">
+      <span class="brand-mark-dot"></span>
+      <span>Research Studio</span>
+    </a>
+
+    <nav class="masthead-nav">
+      <a href="#overview">Overview</a>
+      <a href="#workflow">Workflow</a>
+      <a href="#workspace">Workspace</a>
+    </nav>
+
+    <div class="masthead-actions">
+      <span class="status-pill" id="system-mode-pill">Checking system</span>
+      <button type="button" class="button button-ghost button-small" id="scroll-to-workspace">
+        Open workspace
+      </button>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero-shell" id="overview">
+      <div class="hero-copy">
+        <p class="eyebrow">Automated research pipeline</p>
+        <h1>Find signal on YouTube, send it into NotebookLM, ship polished deliverables.</h1>
+        <p class="hero-text">
+          This studio turns one topic into a research workflow: discover videos, curate the best set,
+          push the URLs into NotebookLM, and generate analysis, infographic concepts, slide decks, and flashcards.
+        </p>
+
+        <div class="hero-actions">
+          <button type="button" class="button button-primary" id="scroll-to-search">Start with a topic</button>
+          <button type="button" class="button button-secondary" id="scroll-to-pipeline">Jump to NotebookLM</button>
+        </div>
+
+        <div class="hero-command-card">
+          <p class="card-label">Target workflow</p>
+          <pre class="hero-command">Use the yt-research skill to find the 25 latest trending videos on [topic], send them to NotebookLM, summarize the findings, then create a handwritten chalkboard infographic.</pre>
+        </div>
+      </div>
+
+      <aside class="hero-status-panel">
+        <section class="system-card">
+          <div class="card-head">
+            <div>
+              <p class="card-label">System readiness</p>
+              <h2>Live environment check</h2>
+            </div>
+            <span class="signal-dot" id="system-dot"></span>
+          </div>
+
+          <div class="system-grid">
+            <article class="metric-tile">
+              <p class="tile-label">NotebookLM auth</p>
+              <strong id="auth-state">Checking...</strong>
+              <span id="auth-source">Waiting for status</span>
+            </article>
+
+            <article class="metric-tile">
+              <p class="tile-label">Python runtime</p>
+              <strong id="python-state">Checking...</strong>
+              <span id="python-path">Discovering interpreter</span>
+            </article>
+
+            <article class="metric-tile">
+              <p class="tile-label">Deployment mode</p>
+              <strong id="server-mode">Loading...</strong>
+              <span id="output-root">Loading output directory</span>
+            </article>
+
+            <article class="metric-tile metric-command">
+              <p class="tile-label">Login command</p>
+              <code id="login-command">.\notebooklm.cmd login</code>
+              <span id="deploy-hint">Preparing auth instructions</span>
+            </article>
+          </div>
+        </section>
+
+        <section class="spotlight-card">
+          <p class="card-label">What this page unlocks</p>
+          <ul class="spotlight-list">
+            <li>Topic-first YouTube discovery with structured metadata</li>
+            <li>NotebookLM import and synthesis from selected video URLs</li>
+            <li>Artifact generation for infographics, decks, and flashcards</li>
+          </ul>
+        </section>
+      </aside>
+    </section>
+
+    <section class="capability-strip" id="workflow">
+      <article class="capability-card">
+        <p class="card-index">01</p>
+        <h3>Discover</h3>
+        <p>Search a topic and rank the strongest videos by freshness or views without leaving the page.</p>
+      </article>
+
+      <article class="capability-card">
+        <p class="card-index">02</p>
+        <h3>Synthesize</h3>
+        <p>Push the selected URLs into NotebookLM and ask focused questions about themes, disagreements, and tactics.</p>
+      </article>
+
+      <article class="capability-card">
+        <p class="card-index">03</p>
+        <h3>Deliver</h3>
+        <p>Generate downstream outputs with styles and formats tuned for slide decks, classroom handouts, or visual explainers.</p>
+      </article>
+    </section>
+
+    <section class="process-section">
+      <div class="section-heading">
+        <p class="eyebrow">Three-step flow</p>
+        <h2>Built for a single-command research handoff</h2>
+        <p>
+          The landing page is just the front door. Underneath it, the existing Codex skills and Python backend still run
+          the actual YouTube and NotebookLM pipeline.
+        </p>
+      </div>
+
+      <div class="process-grid">
+        <article class="process-card">
+          <span class="process-step">Step 1</span>
+          <h3>Pick a topic</h3>
+          <p>Enter a research topic and pull back a ranked set of candidate videos with titles, views, author, duration, and URLs.</p>
+        </article>
+
+        <article class="process-card">
+          <span class="process-step">Step 2</span>
+          <h3>Curate the source set</h3>
+          <p>Select exactly which videos should move into NotebookLM, then send them to the notebook composer in one click.</p>
+        </article>
+
+        <article class="process-card">
+          <span class="process-step">Step 3</span>
+          <h3>Generate artifacts</h3>
+          <p>Run analysis prompts and request infographic, slide deck, or flashcard outputs from the same notebook.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="workspace-shell" id="workspace">
+      <div class="section-heading workspace-heading">
+        <p class="eyebrow">Interactive studio</p>
+        <h2>Search, curate, and run the pipeline from one page</h2>
+      </div>
+
+      <div class="workspace-grid">
+        <section class="studio-column">
+          <article class="panel panel-primary" id="search-panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Step 1</p>
+                <h3>YouTube Research Lab</h3>
+              </div>
+              <p class="panel-copy">Search by topic, inspect results, and choose the exact videos that should be imported.</p>
+            </div>
+
+            <form id="yt-form" class="form-grid">
+              <label class="field field-wide">
+                <span>Topic or query</span>
+                <input
+                  type="text"
+                  id="query"
+                  name="query"
+                  placeholder="e.g. ai coding agents, climate storytelling, design systems"
+                  required
+                />
+              </label>
+
+              <label class="field">
+                <span>Video count</span>
+                <input type="number" id="count" name="count" min="5" max="50" value="25" />
+              </label>
+
+              <label class="field">
+                <span>Search mode</span>
+                <select id="search_mode" name="search_mode">
+                  <option value="latest">Latest leaning</option>
+                  <option value="relevance">Relevance leaning</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Rank by</span>
+                <select id="sort" name="sort">
+                  <option value="views">Views</option>
+                  <option value="latest">Upload date</option>
+                </select>
+              </label>
+
+              <div class="form-actions field-wide">
+                <button type="submit" class="button button-primary" id="yt-submit">Search YouTube</button>
+                <button type="button" class="button button-ghost" id="clear-results">Clear results</button>
+              </div>
+            </form>
+
+            <div id="yt-status" class="message" hidden></div>
+            <div id="yt-warning" class="message message-warning" hidden></div>
+
+            <section class="results-shell" id="yt-results" hidden>
+              <div class="results-toolbar">
+                <div>
+                  <p class="card-label">Search summary</p>
+                  <p class="results-meta" id="yt-meta"></p>
+                </div>
+
+                <div class="toolbar-actions">
+                  <button type="button" class="button button-ghost button-small" id="select-all-videos">Select all</button>
+                  <button type="button" class="button button-ghost button-small" id="clear-selection">Clear selection</button>
+                  <button type="button" class="button button-secondary button-small" id="copy-selected-urls">Copy URLs</button>
+                  <button type="button" class="button button-primary button-small" id="use-in-notebooklm">Send to NotebookLM</button>
+                </div>
+              </div>
+
+              <div class="selection-ribbon">
+                <strong id="selection-count">0 selected</strong>
+                <span>Only selected videos move into the NotebookLM composer.</span>
+              </div>
+
+              <div class="video-grid" id="video-grid"></div>
+            </section>
+          </article>
+        </section>
+
+        <section class="studio-column">
+          <article class="panel panel-secondary sticky-panel" id="pipeline-panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Step 2</p>
+                <h3>NotebookLM Studio</h3>
+              </div>
+              <p class="panel-copy">Import selected URLs, shape the analysis prompt, and request the output bundle you want.</p>
+            </div>
+
+            <form id="nl-form" class="form-grid">
+              <label class="field field-wide">
+                <span>Notebook title</span>
+                <input type="text" id="nl-title" name="title" placeholder="YouTube Research: AI Agents" required />
+              </label>
+
+              <label class="field field-wide">
+                <span>URLs or yt-research JSON</span>
+                <textarea
+                  id="nl-urls"
+                  name="urls"
+                  rows="6"
+                  placeholder="Paste one URL per line, or use the selected YouTube results."
+                ></textarea>
+              </label>
+
+              <label class="field field-wide">
+                <span>Analysis prompt</span>
+                <textarea
+                  id="nl-analysis"
+                  name="analysis_prompt"
+                  rows="4"
+                  placeholder="Summarize the strongest themes, disagreements, and actionable takeaways."
+                ></textarea>
+              </label>
+
+              <div class="preset-row field-wide">
+                <button type="button" class="chip-button" data-prompt="Summarize the strongest recurring themes across these videos and explain why they matter.">Themes</button>
+                <button type="button" class="chip-button" data-prompt="Compare the top viewpoints, disagreements, and blind spots across these videos.">Compare viewpoints</button>
+                <button type="button" class="chip-button" data-prompt="Extract the most actionable tactics, frameworks, and examples from these videos.">Actionable tactics</button>
+              </div>
+
+              <div class="field field-wide">
+                <span>Artifact bundle</span>
+                <div class="artifact-picker">
+                  <label class="artifact-option">
+                    <input type="checkbox" name="artifact" value="infographic" checked />
+                    <span>Infographic</span>
+                  </label>
+                  <label class="artifact-option">
+                    <input type="checkbox" name="artifact" value="slide-deck" />
+                    <span>Slide deck</span>
+                  </label>
+                  <label class="artifact-option">
+                    <input type="checkbox" name="artifact" value="flashcards" />
+                    <span>Flashcards</span>
+                  </label>
+                </div>
+              </div>
+
+              <details class="advanced-panel field-wide">
+                <summary>Fine tune the output</summary>
+                <div class="advanced-grid">
+                  <label class="field field-wide">
+                    <span>Artifact instructions</span>
+                    <input
+                      type="text"
+                      id="nl-artifact-instructions"
+                      name="artifact_instructions"
+                      placeholder="e.g. handwritten chalkboard style, bold iconography, concise captions"
+                    />
+                  </label>
+
+                  <label class="field">
+                    <span>Infographic style</span>
+                    <select id="nl-infographic-style" name="infographic_style">
+                      <option value="auto">Auto</option>
+                      <option value="sketch-note">Sketch note</option>
+                      <option value="professional">Professional</option>
+                      <option value="bento-grid">Bento grid</option>
+                      <option value="editorial">Editorial</option>
+                      <option value="instructional">Instructional</option>
+                      <option value="scientific">Scientific</option>
+                    </select>
+                  </label>
+
+                  <label class="field">
+                    <span>Slide deck file</span>
+                    <select id="nl-slide-format" name="slide_deck_output_format">
+                      <option value="pptx">PPTX</option>
+                      <option value="pdf">PDF</option>
+                    </select>
+                  </label>
+
+                  <label class="field">
+                    <span>Flashcards file</span>
+                    <select id="nl-flashcards-format" name="flashcards_format">
+                      <option value="markdown">Markdown</option>
+                      <option value="json">JSON</option>
+                      <option value="html">HTML</option>
+                    </select>
+                  </label>
+                </div>
+              </details>
+
+              <div class="form-actions field-wide">
+                <button type="submit" class="button button-primary" id="nl-submit">Run NotebookLM pipeline</button>
+                <button type="button" class="button button-ghost" id="clear-pipeline">Reset</button>
+              </div>
+            </form>
+
+            <div id="nl-status" class="message" hidden></div>
+
+            <section class="activity-card" id="nl-job-progress" hidden>
+              <div class="activity-copy">
+                <p class="card-label">Live job status</p>
+                <h4 id="job-stage">Queued</h4>
+                <p id="job-helper">The page will poll automatically while the backend works.</p>
+              </div>
+              <div class="progress-track">
+                <div class="progress-bar" id="job-progress-bar"></div>
+              </div>
+            </section>
+          </article>
+
+          <article class="panel panel-tertiary" id="result-panel" hidden>
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Step 3</p>
+                <h3>NotebookLM Output</h3>
+              </div>
+              <p class="panel-copy">Review the synthesis, inspect citations, and download every generated artifact.</p>
+            </div>
+
+            <div class="summary-grid" id="result-summary"></div>
+
+            <section class="analysis-block">
+              <div class="analysis-head">
+                <p class="card-label">NotebookLM analysis</p>
+                <span class="pill" id="citation-count">0 references</span>
+              </div>
+              <div class="analysis-body" id="analysis-answer"></div>
+            </section>
+
+            <section>
+              <div class="analysis-head">
+                <p class="card-label">Downloads</p>
+              </div>
+              <div class="artifact-downloads" id="nl-artifacts"></div>
+            </section>
+
+            <details class="advanced-panel">
+              <summary>Inspect raw pipeline JSON</summary>
+              <pre class="raw-json" id="raw-json"></pre>
+            </details>
+          </article>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+[project]
+name = "youtube-research-studio"
+version = "0.1.0"
+description = "YouTube research and NotebookLM studio"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "flask>=3.0",
+  "flask-cors>=4.0",
+  "gunicorn>=23.0",
+  "notebooklm-py>=0.3.4,<0.4",
+  "yt-dlp>=2026.3.13",
+]
+
+[tool.vercel.scripts]
+build = "python scripts/sync_public.py"

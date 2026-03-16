@@ -40,6 +40,8 @@ This app is designed for a persistent Python host such as Render, Railway, Fly.i
 ### Required deployment pieces now included
 
 - root `requirements.txt`
+- root `app.py` for Vercel/Flask detection
+- root `pyproject.toml` for Vercel's current Python builder
 - production WSGI entrypoint `wsgi.py`
 - Render blueprint `render.yaml`
 - container build `Dockerfile`
@@ -60,6 +62,15 @@ This app is designed for a persistent Python host such as Render, Railway, Fly.i
 4. Redeploy.
 
 The included `render.yaml` already points `OUTPUTS_ROOT` and `NOTEBOOKLM_HOME` at the mounted disk.
+
+### Vercel note
+
+Vercel can now build and serve the landing page for this repo, but the full NotebookLM pipeline still has serverless limitations around long-running jobs, subprocesses, and durable artifact storage. The Vercel-specific files are:
+
+- `app.py`
+- `pyproject.toml`
+- `vercel.json`
+- `scripts/sync_public.py`
 
 ## Usage
 

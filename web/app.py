@@ -23,6 +23,7 @@ DEFAULT_WORKSPACE_ROOT = APP_ROOT.parents[0]
 WORKSPACE_ROOT = Path(
     os.environ.get("WORKSPACE_ROOT", str(DEFAULT_WORKSPACE_ROOT))
 ).resolve()
+PUBLIC_ROOT = (WORKSPACE_ROOT / "public").resolve()
 OUTPUTS_ROOT = Path(
     os.environ.get("OUTPUTS_ROOT", str(WORKSPACE_ROOT / "outputs" / "notebooklm"))
 ).resolve()
@@ -36,7 +37,13 @@ NOTEBOOKLM_CONTEXT = Path(
     os.environ.get("NOTEBOOKLM_CONTEXT", str(NOTEBOOKLM_HOME / "context.json"))
 ).resolve()
 
-app = Flask(__name__, static_folder=str(APP_ROOT / "static"), static_url_path="")
+def get_static_root() -> Path:
+    if os.environ.get("VERCEL") and PUBLIC_ROOT.exists():
+        return PUBLIC_ROOT
+    return APP_ROOT / "static"
+
+
+app = Flask(__name__, static_folder=str(get_static_root()), static_url_path="")
 CORS(app)
 
 jobs: dict[str, dict[str, Any]] = {}
