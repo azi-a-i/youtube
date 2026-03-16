@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: youtube-research-studio
+    env: python
+    rootDir: .
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:${PORT:-10000} wsgi:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: OUTPUTS_ROOT
+        value: /var/data/outputs/notebooklm
+      - key: NOTEBOOKLM_HOME
+        value: /var/data/.notebooklm
+    disk:
+      name: notebooklm-data
+      mountPath: /var/data
+      sizeGB: 5

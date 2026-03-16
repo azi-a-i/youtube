@@ -1,0 +1,9 @@
+.git
+.venv
+.python-runtime
+.playwright-browsers
+.tmp
+__pycache__/
+*.pyc
+outputs/
+.notebooklm/

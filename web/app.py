@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import uuid
@@ -16,13 +18,25 @@ from typing import Any
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
-OUTPUTS_ROOT = WORKSPACE_ROOT / "outputs" / "notebooklm"
-NOTEBOOKLM_HOME = WORKSPACE_ROOT / ".notebooklm"
-NOTEBOOKLM_STORAGE = NOTEBOOKLM_HOME / "storage_state.json"
-NOTEBOOKLM_CONTEXT = NOTEBOOKLM_HOME / "context.json"
+APP_ROOT = Path(__file__).resolve().parent
+DEFAULT_WORKSPACE_ROOT = APP_ROOT.parents[0]
+WORKSPACE_ROOT = Path(
+    os.environ.get("WORKSPACE_ROOT", str(DEFAULT_WORKSPACE_ROOT))
+).resolve()
+OUTPUTS_ROOT = Path(
+    os.environ.get("OUTPUTS_ROOT", str(WORKSPACE_ROOT / "outputs" / "notebooklm"))
+).resolve()
+NOTEBOOKLM_HOME = Path(
+    os.environ.get("NOTEBOOKLM_HOME", str(WORKSPACE_ROOT / ".notebooklm"))
+).resolve()
+NOTEBOOKLM_STORAGE = Path(
+    os.environ.get("NOTEBOOKLM_STORAGE", str(NOTEBOOKLM_HOME / "storage_state.json"))
+).resolve()
+NOTEBOOKLM_CONTEXT = Path(
+    os.environ.get("NOTEBOOKLM_CONTEXT", str(NOTEBOOKLM_HOME / "context.json"))
+).resolve()
 
-app = Flask(__name__, static_folder="static", static_url_path="")
+app = Flask(__name__, static_folder=str(APP_ROOT / "static"), static_url_path="")
 CORS(app)
 
 jobs: dict[str, dict[str, Any]] = {}
@@ -33,26 +47,69 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def get_python_exe() -> Path:
-    venv_python = WORKSPACE_ROOT / ".venv" / "Scripts" / "python.exe"
-    if venv_python.exists():
-        return venv_python
-    return Path(os.environ.get("PYTHON", "python"))
+def env_truthy(name: str) -> bool:
+    value = os.environ.get(name, "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_python_command() -> str:
+    candidates = [
+        WORKSPACE_ROOT / ".venv" / "Scripts" / "python.exe",
+        WORKSPACE_ROOT / ".venv" / "bin" / "python",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    if sys.executable:
+        return sys.executable
+
+    env_python = os.environ.get("PYTHON")
+    if env_python:
+        resolved = shutil.which(env_python)
+        return resolved or env_python
+
+    return shutil.which("python") or shutil.which("python3") or "python"
+
+
+def is_python_ready(command: str) -> bool:
+    return Path(command).exists() or shutil.which(command) is not None
+
+
+def get_notebooklm_auth_source() -> str:
+    auth_json = os.environ.get("NOTEBOOKLM_AUTH_JSON")
+    if auth_json is not None and auth_json.strip():
+        return "env"
+    if NOTEBOOKLM_STORAGE.exists():
+        return "storage-file"
+    if auth_json is not None:
+        return "env-invalid"
+    return "missing"
 
 
 def serialize_system_status() -> dict[str, Any]:
-    python_exe = get_python_exe()
+    python_command = get_python_command()
+    auth_source = get_notebooklm_auth_source()
     return {
         "workspace_root": str(WORKSPACE_ROOT),
-        "python_executable": str(python_exe),
-        "python_ready": python_exe.exists(),
+        "python_executable": python_command,
+        "python_ready": is_python_ready(python_command),
+        "server_mode": "production" if os.environ.get("PORT") else "local",
+        "port": os.environ.get("PORT", "5000"),
         "notebooklm_home": str(NOTEBOOKLM_HOME),
-        "auth_ready": NOTEBOOKLM_STORAGE.exists(),
+        "auth_ready": auth_source in {"env", "storage-file"},
+        "auth_source": auth_source,
+        "auth_env_var": "NOTEBOOKLM_AUTH_JSON",
         "storage_state_path": str(NOTEBOOKLM_STORAGE),
         "context_path": str(NOTEBOOKLM_CONTEXT),
         "outputs_root": str(OUTPUTS_ROOT),
         "login_command": r".\notebooklm.cmd login",
         "run_command": r".\run-web.cmd",
+        "deploy_auth_hint": (
+            "For hosted deployments, set NOTEBOOKLM_AUTH_JSON to the full contents "
+            "of storage_state.json so the server can authenticate without an "
+            "interactive browser login."
+        ),
         "skills": {
             "yt_research": str(
                 WORKSPACE_ROOT / "skills" / "yt-research" / "scripts" / "search_youtube.py"
@@ -110,7 +167,7 @@ def run_yt_research(
     pool = pool_size or max(count, count * 3)
     script = WORKSPACE_ROOT / "skills" / "yt-research" / "scripts" / "search_youtube.py"
     cmd = [
-        str(get_python_exe()),
+        get_python_command(),
         str(script),
         "--query",
         query,
@@ -175,7 +232,7 @@ def run_notebooklm_pipeline(
         OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
 
         cmd = [
-            str(get_python_exe()),
+            get_python_command(),
             str(script),
             "pipeline",
             "--title",
@@ -248,6 +305,11 @@ def run_notebooklm_pipeline(
 @app.route("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
+
+
+@app.route("/healthz")
+def healthcheck():
+    return jsonify({"status": "ok", "time": now_iso()})
 
 
 @app.route("/api/system/status")
@@ -367,4 +429,8 @@ def serve_artifact(subpath: str):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "5000")),
+        debug=env_truthy("FLASK_DEBUG"),
+    )
